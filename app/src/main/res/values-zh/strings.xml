@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">微信远程控制</string>
+    <string name="accessibility_description">基于微信的无人值守服务</string>
+
+    <string name="wechat_accept_call">接听</string>
+</resources>
