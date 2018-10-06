@@ -10,6 +10,7 @@ import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.PendingIntent.CanceledException;
 import android.content.Context;
+import android.content.res.Resources;
 import android.media.MediaPlayer;
 import android.os.AsyncTask;
 import android.os.PowerManager;
@@ -141,84 +142,66 @@ public class MonitorEntrance extends AccessibilityService {
         service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK);
     }
 
+    private void launchNotificationActivity(AccessibilityEvent event) {
+        try {
+            Notification notification = (Notification) event.getParcelableData();
+            PendingIntent pendingIntent = notification.contentIntent;
+            pendingIntent.send();
+        } catch (CanceledException e) {
+            e.printStackTrace();
+        }
+    }
+
     //实现辅助功能
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         int eventType = event.getEventType();
-        Log.i(TAG, Integer.toString(eventType));
+        String className = null;
+        if (null != event.getClassName()) {
+            className = event.getClassName().toString();
+        }
+        Log.i(TAG, String.format("type:%d, class:%s", eventType, className));
         justWakeupAndRelease();
         switch (eventType) {
             //第一步：监听通知栏消息
             case AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED:
                 List<CharSequence> texts = event.getText();
-                Log.d(TAG, "tests:" + texts.toString());
-                if (!texts.isEmpty()) {
-                    for (CharSequence text : texts) {
-                        String content = text.toString();
-                        Log.i(TAG, "text:"+content);
-                        //收到红包提醒
-                        if (content.contains("[微信红包]")||content.contains("[QQ红包]")) {
-                            //模拟打开通知栏消息
-                            if (event.getParcelableData() != null && event.getParcelableData() instanceof Notification) {
-                                //播放提示音
-                                playSound(this);
-                                //若是微信红包则解锁并自动打开，若是qq红包则只提示并跳转到有红包的聊天界面,暂未实现qq红包自动领取功能
-                                if(content.contains("[微信红包]"))
-                                    wakeAndUnlock(true);
-                                Log.i(TAG, "canGet=true");
-                                canGet = true;
-                                try {
-                                    Notification notification = (Notification) event.getParcelableData();
-                                    PendingIntent pendingIntent = notification.contentIntent;
-                                    pendingIntent.send();
-                                } catch (CanceledException e) {
-                                    e.printStackTrace();
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
+                Log.d(TAG, "texts:" + texts.toString());
+                launchNotificationActivity(event);
                 break;
             //第二步：监听是否进入微信红包消息界面
-            case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED:
-                String className = event.getClassName().toString();
-                Log.d(TAG, "class:" + className);
-                if (className.equals("com.tencent.mm.ui.LauncherUI")) {
-                    mCurrentWindow = WINDOW_LAUNCHER;
-                    //开始抢红包
-                    Log.i(TAG, "准备抢红包...");
-                    getPacket();
-                } else if (className.equals("com.tencent.mm.plugin.luckymoney.ui.LuckyMoneyReceiveUI")) {
-                    mCurrentWindow = WINDOW_LUCKYMONEY_RECEIVEUI;
-                    //开始打开红包
-                    Log.i(TAG, "打开红包");
-                    openPacket();
-                    wakeAndUnlock(false);
-                } else if(className.equals("com.tencent.mm.plugin.luckymoney.ui.LuckyMoneyDetailUI")) {
-                    mCurrentWindow = WINDOW_LUCKYMONEY_DETAIL;
-                    //返回以方便下次收红包
-                    Log.i(TAG, "返回");
-                    performBack(this);
-                } else if (VIDEO_WINDOW.equals(className)) {
+            case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED: {
+                if (VIDEO_WINDOW.equals(className)) {
                     pickUp();
-                } else {
-                    mCurrentWindow = WINDOW_OTHER;
                 }
-                break;
-
-            case AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED:
-                if(mCurrentWindow != WINDOW_LAUNCHER) { //不在聊天界面或聊天列表，不处理
-                    return;
+            }
+            break;
+            case AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED: {
+                if (VIDEO_WINDOW.equals(className)) {
+                    //switchCamera();
                 }
-                if(canGet) {
-                    getPacket();
-                }
-                break;
+            }
+            break;
             case AccessibilityEvent.TYPE_WINDOWS_CHANGED:
                 pickUp();
                 break;
         }
+    }
+
+    private boolean switchCamera() {
+        AccessibilityNodeInfo nodeInfo = getRootInActiveWindow();
+        if (nodeInfo == null) {
+            return false;
+        }
+        Resources r = getResources();
+        final String switchCamera = r.getString(R.string.wechat_switch_camera);
+        List<AccessibilityNodeInfo> list = nodeInfo.findAccessibilityNodeInfosByText(switchCamera);
+        if (null != list && list.size() > 0) {
+            Log.d(TAG, "switch Camera found!" + list.get(0).getViewIdResourceName());
+            performClick(list.get(0));
+            return true;
+        }
+        return false;
     }
 
     private boolean pickUpInternal() {
@@ -226,7 +209,9 @@ public class MonitorEntrance extends AccessibilityService {
         if (nodeInfo == null) {
             return false;
         }
-        final String accept = getResources().getString(R.string.wechat_accept_call);
+
+        Resources r = getResources();
+        final String accept = r.getString(R.string.wechat_accept_call);
 
         /*List<AccessibilityNodeInfo> list = nodeInfo.findAccessibilityNodeInfosByViewId("com.tencent.mm:id/cfx");
         if (null != list && list.size() > 0) {
@@ -236,12 +221,12 @@ public class MonitorEntrance extends AccessibilityService {
         }*/
         List<AccessibilityNodeInfo> list = nodeInfo.findAccessibilityNodeInfosByText(accept);
         if (null != list && list.size() > 0) {
-            Log.d(TAG, "Accept found!" + list.get(0).getViewIdResourceName());
+            AccessibilityNodeInfo ani = list.get(0);
+            Log.d(TAG, String.format("Accept found! id:%s, class:%s",
+                    ani.getViewIdResourceName(), ani.getClassName()));
             performClick(list.get(0));
             return true;
         }
-
-
         return false;
     }
 
@@ -359,12 +344,11 @@ public class MonitorEntrance extends AccessibilityService {
     }
 
 
-
     @Override
     public void onDestroy() {
         super.onDestroy();
         Log.i(TAG, "关闭");
-        wakeAndUnlock(false);
+        //wakeAndUnlock(false);
         Toast.makeText(this, "_已关闭抢红包服务_", Toast.LENGTH_LONG).show();
     }
 }

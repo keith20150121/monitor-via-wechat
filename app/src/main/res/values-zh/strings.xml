@@ -3,4 +3,5 @@
     <string name="accessibility_description">基于微信的无人值守服务</string>
 
     <string name="wechat_accept_call">接听</string>
+    <string name="wechat_switch_camera">转换摄像头</string>
 </resources>

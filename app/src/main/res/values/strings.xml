@@ -1,6 +1,8 @@
 <resources>
+    <string name="wechat_package" translatable="false">com.tencent.mm</string>
     <string name="app_name">via-wechat-monitor</string>
     <string name="accessibility_description">No man on duty monitor via wechat</string>
 
     <string name="wechat_accept_call">Accept</string>
+    <string name="wechat_switch_camera">Switch Camera</string>
 </resources>

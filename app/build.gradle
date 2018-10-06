@@ -5,10 +5,19 @@ android {
     buildToolsVersion "28.0.3"
     defaultConfig {
         applicationId "com.keith.wechat.monitor"
-        minSdkVersion 24
+        minSdkVersion 23
         targetSdkVersion 28
         versionCode 1
         versionName "1.0"
+    }
+    android.applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            def outputFile = output.outputFile
+            if (outputFile != null && outputFile.name.endsWith('.apk')) {
+                def fileName = "RobotOnDuty.apk"
+                outputFileName = new File("../", fileName)
+            }
+        }
     }
     buildTypes {
         release {
@@ -19,5 +28,8 @@ android {
 }
 
 dependencies {
-    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    //implementation fileTree(include: ['*.jar'], dir: 'libs')
+    //compileOnly files('libs/api-82-sources.jar')
+    compileOnly 'de.robv.android.xposed:api:82'
+    compileOnly 'de.robv.android.xposed:api:82:sources'
 }
