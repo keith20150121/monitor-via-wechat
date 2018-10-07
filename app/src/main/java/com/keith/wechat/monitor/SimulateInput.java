@@ -26,7 +26,7 @@ public class SimulateInput implements IXposedHookLoadPackage {
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         super.afterHookedMethod(param);
                         Activity thiz = (Activity)param.thisObject;
-                        VideoActivityWatcher.getInstance().activate(thiz);
+                        //VideoActivityWatcher.getInstance().activate(thiz);
                     }
                 });
     }

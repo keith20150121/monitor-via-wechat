@@ -9,17 +9,19 @@ import android.app.KeyguardManager.KeyguardLock;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.PendingIntent.CanceledException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.res.Resources;
 import android.media.MediaPlayer;
 import android.os.AsyncTask;
+import android.os.Bundle;
 import android.os.PowerManager;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 
-import com.keith.wechat.monitor.utility.RunnableWithArgs;
 import com.keith.wechat.monitor.utility.Shell;
 
 public class MonitorEntrance extends AccessibilityService {
@@ -27,24 +29,16 @@ public class MonitorEntrance extends AccessibilityService {
 
     public static final String VIDEO_WINDOW = "com.tencent.mm.plugin.voip.ui.VideoActivity";
 
-    private boolean canGet = false;//能否点击红包
-    private boolean enableKeyguard = true;//默认有屏幕锁
-
-    //窗口状态
-    private static final int WINDOW_NONE = 0;
-    private static final int WINDOW_LUCKYMONEY_RECEIVEUI = 1;
-    private static final int WINDOW_LUCKYMONEY_DETAIL = 2;
-    private static final int WINDOW_LAUNCHER = 3;
-    private static final int WINDOW_OTHER = -1;
-    //当前窗口
-    private int mCurrentWindow = WINDOW_NONE;
-
     //锁屏、解锁相关
     private KeyguardManager mKeyguardMgr;
     private KeyguardLock mKeyguardLock;
     //唤醒屏幕相关
     private PowerManager mPowerMgr;
     private PowerManager.WakeLock mWakeupLock = null;
+
+    private String mSender;
+    private AccessibilityNodeInfo mSenderInfo;
+    private String mContent;
 
     private final Runnable mDelayReleaseWakeLock = new Runnable() {
         @Override
@@ -62,8 +56,92 @@ public class MonitorEntrance extends AccessibilityService {
 
     private void justWakeupAndRelease() {
         if (mWakeupLock.isHeld()) return;
-        mWakeupLock.acquire();
+        mWakeupLock.acquire(400);
         AsyncTask.execute(mDelayReleaseWakeLock);
+    }
+
+    /**
+     *
+     * @param event
+     */
+    private void sendNotificationReply(AccessibilityEvent event) {
+        if (event.getParcelableData() != null
+                && event.getParcelableData() instanceof Notification) {
+            Notification notification = (Notification) event
+                    .getParcelableData();
+            String content = notification.tickerText.toString();
+            String[] cc = content.split(":");
+            mSender = cc[0].trim();
+            mContent = cc[1].trim();
+
+            android.util.Log.i(TAG, "sender name =" + mSender);
+            android.util.Log.i(TAG, "sender content =" + mContent);
+
+
+            PendingIntent pendingIntent = notification.contentIntent;
+            try {
+                pendingIntent.send();
+            } catch (PendingIntent.CanceledException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    @SuppressLint("NewApi")
+    private boolean fill() {
+        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+        if (rootNode != null) {
+            return findEditText(rootNode, "正在忙,稍后回复你");
+        }
+        return false;
+    }
+
+
+    private boolean findEditText(AccessibilityNodeInfo rootNode, String content) {
+        int count = rootNode.getChildCount();
+
+        android.util.Log.d(TAG, "root class=" + rootNode.getClassName() + ","+ rootNode.getText()+","+count);
+        for (int i = 0; i < count; i++) {
+            AccessibilityNodeInfo nodeInfo = rootNode.getChild(i);
+            if (nodeInfo == null) {
+                android.util.Log.d(TAG, "nodeinfo = null");
+                continue;
+            }
+
+            android.util.Log.d(TAG, "class=" + nodeInfo.getClassName());
+            android.util.Log.e(TAG, "ds=" + nodeInfo.getContentDescription());
+            if (nodeInfo.getContentDescription() != null) {
+                int nindex = nodeInfo.getContentDescription().toString().indexOf(mSender);
+                int cindex = nodeInfo.getContentDescription().toString().indexOf(mContent);
+                android.util.Log.e(TAG, "nindex=" + nindex + " cindex=" +cindex);
+                if (nindex != -1) {
+                    mSenderInfo = nodeInfo;
+                    android.util.Log.i(TAG, "find node info");
+                }
+            }
+            if ("android.widget.EditText".contentEquals(nodeInfo.getClassName())) {
+                android.util.Log.i(TAG, "==================");
+                Bundle arguments = new Bundle();
+                arguments.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT,
+                        AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD);
+                arguments.putBoolean(AccessibilityNodeInfo.ACTION_ARGUMENT_EXTEND_SELECTION_BOOLEAN,
+                        true);
+                nodeInfo.performAction(AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
+                        arguments);
+                nodeInfo.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                ClipData clip = ClipData.newPlainText("label", content);
+                ClipboardManager clipboardManager = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                clipboardManager.setPrimaryClip(clip);
+                nodeInfo.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+                return true;
+            }
+
+            if (findEditText(nodeInfo, content)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //播放提示声音
@@ -78,7 +156,7 @@ public class MonitorEntrance extends AccessibilityService {
     }
 
     //唤醒屏幕和解锁
-    private void wakeAndUnlock(boolean unLock) {
+    /*private void wakeAndUnlock(boolean unLock) {
         if (unLock)
         {
             //若为黑屏状态则唤醒屏幕
@@ -114,7 +192,7 @@ public class MonitorEntrance extends AccessibilityService {
                 Log.i(TAG, "关灯");
             }
         }
-    }
+    }*/
     //通过文本查找节点
     public  AccessibilityNodeInfo findNodeInfosByText(AccessibilityNodeInfo nodeInfo, String text) {
         List<AccessibilityNodeInfo> list = nodeInfo.findAccessibilityNodeInfosByText(text);
@@ -163,13 +241,12 @@ public class MonitorEntrance extends AccessibilityService {
         Log.i(TAG, String.format("type:%d, class:%s", eventType, className));
         justWakeupAndRelease();
         switch (eventType) {
-            //第一步：监听通知栏消息
             case AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED:
                 List<CharSequence> texts = event.getText();
                 Log.d(TAG, "texts:" + texts.toString());
-                launchNotificationActivity(event);
+                //launchNotificationActivity(event);
+                sendNotificationReply(event);
                 break;
-            //第二步：监听是否进入微信红包消息界面
             case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED: {
                 if (VIDEO_WINDOW.equals(className)) {
                     pickUp();
@@ -255,37 +332,6 @@ public class MonitorEntrance extends AccessibilityService {
         }*/
     }
 
-    //找到红包并点击
-    @SuppressLint("NewApi")
-    private void getPacket() {
-        AccessibilityNodeInfo nodeInfo = getRootInActiveWindow();
-        if (nodeInfo == null) {
-            return;
-        }
-        // 找到领取红包的点击事件
-        List<AccessibilityNodeInfo> list = nodeInfo.findAccessibilityNodeInfosByText("领取红包");
-
-        if(list != null ) {
-            if(list.isEmpty()) {
-                Log.i(TAG, "领取列表为空");
-                // 从消息列表查找红包
-                AccessibilityNodeInfo node = findNodeInfosByText(nodeInfo, "[微信红包]");
-                if(node != null) {
-                    canGet = true;
-                    performClick(node);
-                }
-            }
-            else {
-                if(canGet) {
-                    //最新的红包领起
-                    AccessibilityNodeInfo node = list.get(list.size() - 1);
-                    performClick(node);
-                    Log.i(TAG, "canGet=false");
-                    canGet = false;
-                }
-            }
-        }
-    }
     //打开红包
     @SuppressLint("NewApi")
     private void openPacket() {
