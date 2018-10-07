@@ -4,4 +4,9 @@
 
     <string name="wechat_accept_call">接听</string>
     <string name="wechat_switch_camera">转换摄像头</string>
+    <string name="wechat_send_message">发送</string>
+
+    <string name="robot_is_on">机器人上线了。</string>
+    <string name="robot_is_off">机器人下线了。</string>
+    <string name="robot_is_interrupted">机器人被中断，被迫退出。</string>
 </resources>

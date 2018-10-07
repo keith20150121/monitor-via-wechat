@@ -1,8 +1,15 @@
 <resources>
     <string name="wechat_package" translatable="false">com.tencent.mm</string>
+    <string name="exposed_package" translatable="false">io.va.exposed</string>
+
     <string name="app_name">via-wechat-monitor</string>
     <string name="accessibility_description">No man on duty monitor via wechat</string>
 
     <string name="wechat_accept_call">Accept</string>
     <string name="wechat_switch_camera">Switch Camera</string>
+    <string name="wechat_send_message">Send</string>
+
+    <string name="robot_is_on">Robot is on.</string>
+    <string name="robot_is_off">Robot is off.</string>
+    <string name="robot_is_interrupted">Robot is interrupted.</string>
 </resources>

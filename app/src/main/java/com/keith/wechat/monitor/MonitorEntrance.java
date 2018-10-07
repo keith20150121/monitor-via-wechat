@@ -12,11 +12,13 @@ import android.app.PendingIntent.CanceledException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.Resources;
 import android.media.MediaPlayer;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -28,11 +30,10 @@ public class MonitorEntrance extends AccessibilityService {
     private static final String TAG = "no-man-duty-entrance";
 
     public static final String VIDEO_WINDOW = "com.tencent.mm.plugin.voip.ui.VideoActivity";
+    public static final String CHAT_WINDOW = "com.tencent.mm.ui.LauncherUI";
 
-    //锁屏、解锁相关
     private KeyguardManager mKeyguardMgr;
-    private KeyguardLock mKeyguardLock;
-    //唤醒屏幕相关
+    //private KeyguardLock mKeyguardLock;
     private PowerManager mPowerMgr;
     private PowerManager.WakeLock mWakeupLock = null;
 
@@ -87,11 +88,29 @@ public class MonitorEntrance extends AccessibilityService {
         }
     }
 
+    private void send() {
+        AccessibilityNodeInfo nodeInfo = getRootInActiveWindow();
+        final String go = getResources().getString(R.string.wechat_send_message);
+        if (nodeInfo != null) {
+            List<AccessibilityNodeInfo> list = nodeInfo
+                    .findAccessibilityNodeInfosByText(go);
+            if (list != null && list.size() > 0) {
+                for (AccessibilityNodeInfo n : list) {
+                    n.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                }
+
+            }
+            //pressBackButton();
+        }
+
+    }
+
+
     @SuppressLint("NewApi")
-    private boolean fill() {
+    private boolean fill(String content) {
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode != null) {
-            return findEditText(rootNode, "正在忙,稍后回复你");
+            return findEditText(rootNode, content);
         }
         return false;
     }
@@ -110,7 +129,7 @@ public class MonitorEntrance extends AccessibilityService {
 
             android.util.Log.d(TAG, "class=" + nodeInfo.getClassName());
             android.util.Log.e(TAG, "ds=" + nodeInfo.getContentDescription());
-            if (nodeInfo.getContentDescription() != null) {
+            /*if (nodeInfo.getContentDescription() != null) {
                 int nindex = nodeInfo.getContentDescription().toString().indexOf(mSender);
                 int cindex = nodeInfo.getContentDescription().toString().indexOf(mContent);
                 android.util.Log.e(TAG, "nindex=" + nindex + " cindex=" +cindex);
@@ -118,7 +137,7 @@ public class MonitorEntrance extends AccessibilityService {
                     mSenderInfo = nodeInfo;
                     android.util.Log.i(TAG, "find node info");
                 }
-            }
+            }*/
             if ("android.widget.EditText".contentEquals(nodeInfo.getClassName())) {
                 android.util.Log.i(TAG, "==================");
                 Bundle arguments = new Bundle();
@@ -155,45 +174,6 @@ public class MonitorEntrance extends AccessibilityService {
         }
     }
 
-    //唤醒屏幕和解锁
-    /*private void wakeAndUnlock(boolean unLock) {
-        if (unLock)
-        {
-            //若为黑屏状态则唤醒屏幕
-            if(!mPowerMgr.isScreenOn()) {
-                //获取电源管理器对象，ACQUIRE_CAUSES_WAKEUP这个参数能从黑屏唤醒屏幕
-               // mWakeupLock = mPowerMgr.newWakeLock(
-               //         PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, TAG);
-                //点亮屏幕
-                mWakeupLock.acquire();
-                Log.i(TAG, "亮屏");
-            }
-            //若在锁屏界面则解锁直接跳过锁屏
-            if(mKeyguardMgr.inKeyguardRestrictedInputMode()) {
-                //设置解锁标志，以判断抢完红包能否锁屏
-                enableKeyguard = false;
-                //解锁
-                mKeyguardLock.disableKeyguard();
-                Log.i(TAG, "解锁");
-            }
-        }
-        else
-        {
-            //如果之前解过锁则加锁以恢复原样
-            if(!enableKeyguard) {
-                //锁屏
-                mKeyguardLock.reenableKeyguard();
-                Log.i(TAG, "加锁");
-            }
-            //若之前唤醒过屏幕则释放之使屏幕不保持常亮
-            if(mWakeupLock != null) {
-                mWakeupLock.release();
-                mWakeupLock = null;
-                Log.i(TAG, "关灯");
-            }
-        }
-    }*/
-    //通过文本查找节点
     public  AccessibilityNodeInfo findNodeInfosByText(AccessibilityNodeInfo nodeInfo, String text) {
         List<AccessibilityNodeInfo> list = nodeInfo.findAccessibilityNodeInfosByText(text);
         if(list == null || list.isEmpty()) {
@@ -201,7 +181,7 @@ public class MonitorEntrance extends AccessibilityService {
         }
         return list.get(0);
     }
-    //模拟点击事件
+
     public void performClick(AccessibilityNodeInfo nodeInfo) {
         if (nodeInfo == null) {
             return;
@@ -212,8 +192,8 @@ public class MonitorEntrance extends AccessibilityService {
             performClick(nodeInfo.getParent());
         }
     }
-    //模拟返回事件
-    public  void performBack(AccessibilityService service) {
+
+    public void performBack(AccessibilityService service) {
         if(service == null) {
             return;
         }
@@ -244,12 +224,16 @@ public class MonitorEntrance extends AccessibilityService {
             case AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED:
                 List<CharSequence> texts = event.getText();
                 Log.d(TAG, "texts:" + texts.toString());
-                //launchNotificationActivity(event);
-                sendNotificationReply(event);
+                // Leave it to NotificationListener
+                //sendNotificationReply(event);
                 break;
             case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED: {
                 if (VIDEO_WINDOW.equals(className)) {
                     pickUp();
+                } else if (CHAT_WINDOW.equals(className)) {
+                    if (fill("等一下")) {
+                        send();
+                    }
                 }
             }
             break;
@@ -332,6 +316,15 @@ public class MonitorEntrance extends AccessibilityService {
         }*/
     }
 
+    public void ensureNotificationListenerAuthority() {
+        String string = Settings.Secure.getString(getContentResolver(),
+                "enabled_notification_listeners"); // Settings.ENABLED_NOTIFICATION_LISTENERS
+        if (null == string || !string.contains(NotificationListener.class.getName())) {
+            Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        }
+    }
+
     //打开红包
     @SuppressLint("NewApi")
     private void openPacket() {
@@ -369,32 +362,30 @@ public class MonitorEntrance extends AccessibilityService {
 
     @Override
     public void onInterrupt() {
-        Toast.makeText(this, "抢红包服务被中断啦~", Toast.LENGTH_LONG).show();
+        String interrupted = getResources().getString(R.string.robot_is_interrupted);
+        Toast.makeText(this, interrupted, Toast.LENGTH_LONG).show();
     }
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        Log.i(TAG, "开启");
-        //获取电源管理器对象
+        String on = getResources().getString(R.string.robot_is_on);
+        Log.i(TAG, on);
         mPowerMgr =(PowerManager)getSystemService(Context.POWER_SERVICE);
-        mWakeupLock = mPowerMgr.newWakeLock(
-                PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, TAG);
-        //得到键盘锁管理器对象
+        mWakeupLock = mPowerMgr.newWakeLock(PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, TAG);
         mKeyguardMgr = (KeyguardManager)getSystemService(Context.KEYGUARD_SERVICE);
-        //初始化一个键盘锁管理器对象
-        mKeyguardLock = mKeyguardMgr.newKeyguardLock("unLock");
-        //初始化音频
+        //mKeyguardLock = mKeyguardMgr.newKeyguardLock("unLock");
         //player = MediaPlayer.create(this, R.raw.songtip_m);
-
-        Toast.makeText(this, "_已开启抢红包服务_", Toast.LENGTH_LONG).show();
+        ensureNotificationListenerAuthority();
+        Toast.makeText(this, on, Toast.LENGTH_LONG).show();
     }
 
 
     @Override
     public void onDestroy() {
         super.onDestroy();
-        Log.i(TAG, "关闭");
-        //wakeAndUnlock(false);
-        Toast.makeText(this, "_已关闭抢红包服务_", Toast.LENGTH_LONG).show();
+        String off = getResources().getString(R.string.robot_is_off);
+        Log.i(TAG, off);
+        Toast.makeText(this, off, Toast.LENGTH_LONG).show();
     }
 }
