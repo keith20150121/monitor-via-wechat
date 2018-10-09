@@ -1,22 +1,18 @@
 package com.keith.wechat.monitor;
 
+import java.lang.ref.WeakReference;
 import java.util.Calendar;
 import java.util.List;
 import android.accessibilityservice.AccessibilityService;
-import android.annotation.SuppressLint;
-import android.app.KeyguardManager;
-import android.app.KeyguardManager.KeyguardLock;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.PendingIntent.CanceledException;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Resources;
 import android.media.MediaPlayer;
-import android.os.AsyncTask;
-import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
@@ -24,15 +20,19 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 
+import com.keith.wechat.monitor.utility.AccessibilityHelper;
 import com.keith.wechat.monitor.utility.Shell;
 
 public class MonitorEntrance extends AccessibilityService {
     private static final String TAG = "no-man-duty-entrance";
 
     public static final String VIDEO_WINDOW = "com.tencent.mm.plugin.voip.ui.VideoActivity";
+    public static final String TEXT_PREVIEW_WINDOW = "com.tencent.mm.ui.chatting.TextPreviewUI";
+    public static final String TEXT_PREVIEW_ID = "com.tencent.mm:id/ann";
     public static final String CHAT_WINDOW = "com.tencent.mm.ui.LauncherUI";
+    public static final String CHAT_LIST = "com.tencent.mm:id/mq";
 
-    private KeyguardManager mKeyguardMgr;
+    //private KeyguardManager mKeyguardMgr;
     //private KeyguardLock mKeyguardLock;
     private PowerManager mPowerMgr;
     private PowerManager.WakeLock mWakeupLock = null;
@@ -41,14 +41,16 @@ public class MonitorEntrance extends AccessibilityService {
     private AccessibilityNodeInfo mSenderInfo;
     private String mContent;
 
+    private void executeDelayed(Runnable r, long timeout) {
+        Message msg = Message.obtain();
+        msg.what = MainThreadHandler.MSG_RUNNABLE;
+        msg.obj = r;
+        mHandler.sendMessageDelayed(msg, timeout);
+    }
+
     private final Runnable mDelayReleaseWakeLock = new Runnable() {
         @Override
         public void run() {
-            try {
-                Thread.sleep(200);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
             if (mWakeupLock.isHeld()) {
                 mWakeupLock.release();
             }
@@ -58,7 +60,7 @@ public class MonitorEntrance extends AccessibilityService {
     private void justWakeupAndRelease() {
         if (mWakeupLock.isHeld()) return;
         mWakeupLock.acquire(400);
-        AsyncTask.execute(mDelayReleaseWakeLock);
+        executeDelayed(mDelayReleaseWakeLock, 200);
     }
 
     /**
@@ -105,39 +107,44 @@ public class MonitorEntrance extends AccessibilityService {
 
     }
 
-
-    @SuppressLint("NewApi")
-    private boolean fill(String content) {
-        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-        if (rootNode != null) {
-            return findEditText(rootNode, content);
+    private AccessibilityHelper.ConditionCallback mSwitchCameraFinder = new AccessibilityHelper.ConditionCallback() {
+        @Override
+        public boolean onNodeInfoFound(AccessibilityNodeInfo info, Object... args) {
+            String sc = (String)args[0];
+            if (sc.contentEquals(info.getContentDescription())) {
+                Log.d(TAG, "Switch Camera found! perform click!");
+                AccessibilityHelper.performClick(info);
+                return true;
+            }
+            return false;
         }
-        return false;
+    };
+
+    private boolean switchCamera() {
+        Log.d(TAG, "enter Switch Camera");
+        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+        if (rootNode == null) {
+            return false;
+        }
+        Resources r = getResources();
+        final String sc = r.getString(R.string.wechat_switch_camera);
+        boolean ret = null != AccessibilityHelper.find(rootNode, mSwitchCameraFinder, sc);
+        Log.d(TAG, "leave Switch Camera");
+        return ret;
     }
 
-
-    private boolean findEditText(AccessibilityNodeInfo rootNode, String content) {
+    /*private boolean findEditText2(AccessibilityNodeInfo rootNode, String content) {
         int count = rootNode.getChildCount();
-
-        android.util.Log.d(TAG, "root class=" + rootNode.getClassName() + ","+ rootNode.getText()+","+count);
+        android.util.Log.d(TAG, "root class=" + rootNode.getClassName() + "," + rootNode.getText() + "," + count);
         for (int i = 0; i < count; i++) {
             AccessibilityNodeInfo nodeInfo = rootNode.getChild(i);
             if (nodeInfo == null) {
                 android.util.Log.d(TAG, "nodeinfo = null");
                 continue;
             }
-
             android.util.Log.d(TAG, "class=" + nodeInfo.getClassName());
             android.util.Log.e(TAG, "ds=" + nodeInfo.getContentDescription());
-            /*if (nodeInfo.getContentDescription() != null) {
-                int nindex = nodeInfo.getContentDescription().toString().indexOf(mSender);
-                int cindex = nodeInfo.getContentDescription().toString().indexOf(mContent);
-                android.util.Log.e(TAG, "nindex=" + nindex + " cindex=" +cindex);
-                if (nindex != -1) {
-                    mSenderInfo = nodeInfo;
-                    android.util.Log.i(TAG, "find node info");
-                }
-            }*/
+
             if ("android.widget.EditText".contentEquals(nodeInfo.getClassName())) {
                 android.util.Log.i(TAG, "==================");
                 Bundle arguments = new Bundle();
@@ -154,14 +161,75 @@ public class MonitorEntrance extends AccessibilityService {
                 nodeInfo.performAction(AccessibilityNodeInfo.ACTION_PASTE);
                 return true;
             }
-
             if (findEditText(nodeInfo, content)) {
                 return true;
             }
         }
-
         return false;
+    }*/
+
+
+    private AccessibilityHelper.ConditionCallback mLatestChatContentFinder = new AccessibilityHelper.ConditionCallback() {
+        @Override
+        public boolean onNodeInfoFound(AccessibilityNodeInfo info, Object... args) {
+            if ("com.tencent.mm:id/mq".equals(info.getViewIdResourceName())) {
+                Log.d(TAG, "mq found!");
+            }
+            return false;
+        }
+    };
+
+    private void handleLatestChatContent(String text) {
+        Log.d(TAG, "chat text:" + text);
+        AccessibilityHelper.performBack(this);
     }
+
+    private void LongClickLatestChatContent() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        List<AccessibilityNodeInfo> ret =
+                root.findAccessibilityNodeInfosByViewId(CHAT_LIST);
+        if (null == ret) {
+            Log.d(TAG, "chat list return null!");
+            return;
+        }
+        final int count = ret.size();
+        Log.d(TAG, "id/mq count:" + count);
+        if (count == 0) {
+            return;
+        }
+        final AccessibilityNodeInfo last = ret.get(count - 1);
+        AccessibilityHelper.performLongClick(last);
+    }
+
+    static class MainThreadHandler extends Handler {
+        public static final int MSG_RUNNABLE = 200;
+
+        private WeakReference<MonitorEntrance> mService;
+
+        public MainThreadHandler(MonitorEntrance service) {
+            mService = new WeakReference<MonitorEntrance>(service);
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+            super.handleMessage(msg);
+            MonitorEntrance service = mService.get();
+            if (null == service) {
+                Log.e(TAG, "service is dead.");
+                return;
+            }
+            switch (msg.what) {
+                case MSG_RUNNABLE:
+                    Runnable r =  (Runnable)msg.obj;
+                    if (null != r) {
+                        r.run();
+                    }
+                    break;
+            }
+        }
+    }
+
+    private MainThreadHandler mHandler = new MainThreadHandler(this);
 
     //播放提示声音
     private MediaPlayer player;
@@ -174,30 +242,12 @@ public class MonitorEntrance extends AccessibilityService {
         }
     }
 
-    public  AccessibilityNodeInfo findNodeInfosByText(AccessibilityNodeInfo nodeInfo, String text) {
+    public AccessibilityNodeInfo findNodeInfosByText(AccessibilityNodeInfo nodeInfo, String text) {
         List<AccessibilityNodeInfo> list = nodeInfo.findAccessibilityNodeInfosByText(text);
         if(list == null || list.isEmpty()) {
             return null;
         }
         return list.get(0);
-    }
-
-    public void performClick(AccessibilityNodeInfo nodeInfo) {
-        if (nodeInfo == null) {
-            return;
-        }
-        if (nodeInfo.isClickable()) {
-            nodeInfo.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-        } else {
-            performClick(nodeInfo.getParent());
-        }
-    }
-
-    public void performBack(AccessibilityService service) {
-        if(service == null) {
-            return;
-        }
-        service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK);
     }
 
     private void launchNotificationActivity(AccessibilityEvent event) {
@@ -210,7 +260,6 @@ public class MonitorEntrance extends AccessibilityService {
         }
     }
 
-    //实现辅助功能
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         int eventType = event.getEventType();
@@ -218,12 +267,15 @@ public class MonitorEntrance extends AccessibilityService {
         if (null != event.getClassName()) {
             className = event.getClassName().toString();
         }
-        Log.i(TAG, String.format("type:%d, class:%s", eventType, className));
+        CharSequence c = event.getContentDescription();
+        String describeContent = null != c ? c.toString() : "";
+        List<CharSequence> texts = event.getText();
+        String text = null != texts ? texts.toString() : "";
+        Log.i(TAG, String.format("type:%d, class:%s, describe:%s, text:%s",
+                eventType, className, describeContent, text));
         justWakeupAndRelease();
         switch (eventType) {
             case AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED:
-                List<CharSequence> texts = event.getText();
-                Log.d(TAG, "texts:" + texts.toString());
                 // Leave it to NotificationListener
                 //sendNotificationReply(event);
                 break;
@@ -231,38 +283,38 @@ public class MonitorEntrance extends AccessibilityService {
                 if (VIDEO_WINDOW.equals(className)) {
                     pickUp();
                 } else if (CHAT_WINDOW.equals(className)) {
-                    if (fill("等一下")) {
+                    if (AccessibilityHelper.findEditTextAndPaste(this, "Wait for a minute.")) {
                         send();
+                    }
+                } else if (TEXT_PREVIEW_WINDOW.equals(className)) {
+                    List<AccessibilityNodeInfo> list = getRootInActiveWindow().findAccessibilityNodeInfosByViewId(TEXT_PREVIEW_ID);
+                    if (null == list || 0 == list.size()) {
+                        Log.e(TAG, "cannot find TextView!");
+                        break;
+                    }
+                    c = list.get(0).getText();
+                    if (null != c) {
+                        handleLatestChatContent(c.toString());
+                    } else {
+                        Log.e(TAG, "Preview text is null!");
                     }
                 }
             }
             break;
             case AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED: {
-                if (VIDEO_WINDOW.equals(className)) {
-                    //switchCamera();
-                }
+                /*if (RelativeLayout.class.getName().equals(className)) {
+                    switchCamera();
+                }*/
             }
             break;
-            case AccessibilityEvent.TYPE_WINDOWS_CHANGED:
-                pickUp();
-                break;
+            case AccessibilityEvent.TYPE_VIEW_SCROLLED: {
+                LongClickLatestChatContent();
+            }
+            break;
+            case AccessibilityEvent.TYPE_VIEW_CLICKED: {
+                //tryDoubleClick();
+            }
         }
-    }
-
-    private boolean switchCamera() {
-        AccessibilityNodeInfo nodeInfo = getRootInActiveWindow();
-        if (nodeInfo == null) {
-            return false;
-        }
-        Resources r = getResources();
-        final String switchCamera = r.getString(R.string.wechat_switch_camera);
-        List<AccessibilityNodeInfo> list = nodeInfo.findAccessibilityNodeInfosByText(switchCamera);
-        if (null != list && list.size() > 0) {
-            Log.d(TAG, "switch Camera found!" + list.get(0).getViewIdResourceName());
-            performClick(list.get(0));
-            return true;
-        }
-        return false;
     }
 
     private boolean pickUpInternal() {
@@ -285,7 +337,7 @@ public class MonitorEntrance extends AccessibilityService {
             AccessibilityNodeInfo ani = list.get(0);
             Log.d(TAG, String.format("Accept found! id:%s, class:%s",
                     ani.getViewIdResourceName(), ani.getClassName()));
-            performClick(list.get(0));
+            AccessibilityHelper.performClick(list.get(0));
             return true;
         }
         return false;
@@ -325,41 +377,6 @@ public class MonitorEntrance extends AccessibilityService {
         }
     }
 
-    //打开红包
-    @SuppressLint("NewApi")
-    private void openPacket() {
-        AccessibilityNodeInfo nodeInfo = getRootInActiveWindow();
-        if(nodeInfo == null) {
-            return;
-        }
-
-        Log.i(TAG, "查找打开按钮...");
-        AccessibilityNodeInfo targetNode = null;
-
-        //如果红包已经被抢完则直接返回
-        targetNode = findNodeInfosByText(nodeInfo, "看看大家的手气");
-        if(targetNode != null) {
-            performBack(this);
-            return;
-        }
-        //通过组件名查找开红包按钮，还可通过组件id直接查找但需要知道id且id容易随版本更新而变化，旧版微信还可直接搜“開”字找到按钮
-        if(targetNode == null) {
-            Log.i(TAG, "打开按钮中...");
-            for (int i = 0; i < nodeInfo.getChildCount(); i++) {
-                AccessibilityNodeInfo node = nodeInfo.getChild(i);
-                if("android.widget.Button".equals(node.getClassName())) {
-                    targetNode = node;
-                    break;
-                }
-            }
-        }
-        //若查找到打开按钮则模拟点击
-        if(targetNode != null) {
-            final AccessibilityNodeInfo n = targetNode;
-            performClick(n);
-        }
-    }
-
     @Override
     public void onInterrupt() {
         String interrupted = getResources().getString(R.string.robot_is_interrupted);
@@ -373,13 +390,12 @@ public class MonitorEntrance extends AccessibilityService {
         Log.i(TAG, on);
         mPowerMgr =(PowerManager)getSystemService(Context.POWER_SERVICE);
         mWakeupLock = mPowerMgr.newWakeLock(PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, TAG);
-        mKeyguardMgr = (KeyguardManager)getSystemService(Context.KEYGUARD_SERVICE);
+        //mKeyguardMgr = (KeyguardManager)getSystemService(Context.KEYGUARD_SERVICE);
         //mKeyguardLock = mKeyguardMgr.newKeyguardLock("unLock");
         //player = MediaPlayer.create(this, R.raw.songtip_m);
         ensureNotificationListenerAuthority();
         Toast.makeText(this, on, Toast.LENGTH_LONG).show();
     }
-
 
     @Override
     public void onDestroy() {
