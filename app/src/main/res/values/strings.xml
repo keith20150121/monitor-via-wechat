@@ -8,6 +8,7 @@
     <string name="wechat_accept_call">Accept</string>
     <string name="wechat_switch_camera">Switch Camera</string>
     <string name="wechat_send_message">Send</string>
+    <string name="wechat_copy">Copy</string>
 
     <string name="robot_is_on">Robot is on.</string>
     <string name="robot_is_off">Robot is off.</string>

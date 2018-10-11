@@ -18,6 +18,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.widget.ListView;
 import android.widget.Toast;
 
 import com.keith.wechat.monitor.utility.AccessibilityHelper;
@@ -36,6 +37,8 @@ public class MonitorEntrance extends AccessibilityService {
     //private KeyguardLock mKeyguardLock;
     private PowerManager mPowerMgr;
     private PowerManager.WakeLock mWakeupLock = null;
+
+    private AccessibilityHelper.EventStash mStash = new AccessibilityHelper.EventStash();
 
     private String mSender;
     private AccessibilityNodeInfo mSenderInfo;
@@ -92,8 +95,8 @@ public class MonitorEntrance extends AccessibilityService {
 
     private void send() {
         AccessibilityNodeInfo nodeInfo = getRootInActiveWindow();
-        final String go = getResources().getString(R.string.wechat_send_message);
         if (nodeInfo != null) {
+            final String go = getResources().getString(R.string.wechat_send_message);
             List<AccessibilityNodeInfo> list = nodeInfo
                     .findAccessibilityNodeInfosByText(go);
             if (list != null && list.size() > 0) {
@@ -133,59 +136,65 @@ public class MonitorEntrance extends AccessibilityService {
         return ret;
     }
 
-    /*private boolean findEditText2(AccessibilityNodeInfo rootNode, String content) {
-        int count = rootNode.getChildCount();
-        android.util.Log.d(TAG, "root class=" + rootNode.getClassName() + "," + rootNode.getText() + "," + count);
-        for (int i = 0; i < count; i++) {
-            AccessibilityNodeInfo nodeInfo = rootNode.getChild(i);
-            if (nodeInfo == null) {
-                android.util.Log.d(TAG, "nodeinfo = null");
-                continue;
-            }
-            android.util.Log.d(TAG, "class=" + nodeInfo.getClassName());
-            android.util.Log.e(TAG, "ds=" + nodeInfo.getContentDescription());
+    private AccessibilityHelper.EventStash.Sequence.Callback mLatestMessageCallback =
+            new AccessibilityHelper.EventStash.Sequence.Callback() {
+        private AccessibilityHelper.ConditionCallback mLatestChatContentFinder =
+                new AccessibilityHelper.ConditionCallback() {
+            private String mCopy;
 
-            if ("android.widget.EditText".contentEquals(nodeInfo.getClassName())) {
-                android.util.Log.i(TAG, "==================");
-                Bundle arguments = new Bundle();
-                arguments.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT,
-                        AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD);
-                arguments.putBoolean(AccessibilityNodeInfo.ACTION_ARGUMENT_EXTEND_SELECTION_BOOLEAN,
-                        true);
-                nodeInfo.performAction(AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY,
-                        arguments);
-                nodeInfo.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-                ClipData clip = ClipData.newPlainText("label", content);
-                ClipboardManager clipboardManager = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                clipboardManager.setPrimaryClip(clip);
-                nodeInfo.performAction(AccessibilityNodeInfo.ACTION_PASTE);
+            @Override
+            public boolean onNodeInfoFound(AccessibilityNodeInfo info, Object... args) {
+                if (null == mCopy) {
+                    mCopy = MonitorEntrance.this.getResources().getString(R.string.wechat_copy);
+                }
+                Log.d(TAG, "mLatestChatContentFinder.onNodeInfoFound:" + info.getText());
+                if (mCopy.equals(info.getText())) {
+                    AccessibilityHelper.performClick(info);
+                    return true;
+                }
+                mStash.push(mFromClipboard, AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED);
+                return false;
+            }
+        };
+
+        private AccessibilityHelper.EventStash.Sequence.Callback mFromClipboard =
+                new AccessibilityHelper.EventStash.Sequence.Callback() {
+            @Override
+            public boolean onCompleted(AccessibilityEvent event) {
+                if (AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED == event.getEventType()) {
+                    if ("android.widget.Toast$TN".contentEquals(event.getClassName())) {
+                        MonitorEntrance.this.handleLatestMessage(
+                                AccessibilityHelper.fromClipboard(MonitorEntrance.this));
+                        return true;
+                    }
+                }
                 return true;
             }
-            if (findEditText(nodeInfo, content)) {
-                return true;
-            }
-        }
-        return false;
-    }*/
+        };
 
-
-    private AccessibilityHelper.ConditionCallback mLatestChatContentFinder = new AccessibilityHelper.ConditionCallback() {
         @Override
-        public boolean onNodeInfoFound(AccessibilityNodeInfo info, Object... args) {
-            if ("com.tencent.mm:id/mq".equals(info.getViewIdResourceName())) {
-                Log.d(TAG, "mq found!");
+        public boolean onCompleted(AccessibilityEvent event) {
+            Log.d(TAG, "mLatestMessageCallback onCompleted");
+            if (AccessibilityEvent.TYPE_VIEW_SCROLLED == event.getEventType()) {
+                final String name = ListView.class.getName();
+                if (name.contentEquals(event.getClassName())) {
+                    AccessibilityHelper.find(getRootInActiveWindow(), mLatestChatContentFinder);
+                    return true;
+                }
             }
             return false;
         }
     };
 
-    private void handleLatestChatContent(String text) {
+    private void handleLatestMessage(String text) {
         Log.d(TAG, "chat text:" + text);
-        AccessibilityHelper.performBack(this);
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
+        //AccessibilityHelper.performBack(this);
     }
 
     private void LongClickLatestChatContent() {
         AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (null == root) return;
         List<AccessibilityNodeInfo> ret =
                 root.findAccessibilityNodeInfosByViewId(CHAT_LIST);
         if (null == ret) {
@@ -197,8 +206,21 @@ public class MonitorEntrance extends AccessibilityService {
         if (count == 0) {
             return;
         }
+
+        /*for (AccessibilityNodeInfo i : ret) {
+            i.performAction(AccessibilityNodeInfo.ACTION_CLEAR_SELECTION);
+        }*/
+
         final AccessibilityNodeInfo last = ret.get(count - 1);
-        AccessibilityHelper.performLongClick(last);
+        Log.d(TAG, "last:" + last.toString());
+
+        last.performAction(AccessibilityNodeInfo.ACTION_SELECT);
+        last.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK);
+        mStash.push(mLatestMessageCallback,
+                AccessibilityEvent.TYPE_VIEW_SELECTED,
+                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                AccessibilityEvent.TYPE_VIEW_SCROLLED);
     }
 
     static class MainThreadHandler extends Handler {
@@ -262,6 +284,7 @@ public class MonitorEntrance extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        mStash.process(event);
         int eventType = event.getEventType();
         String className = null;
         if (null != event.getClassName()) {
@@ -273,7 +296,7 @@ public class MonitorEntrance extends AccessibilityService {
         String text = null != texts ? texts.toString() : "";
         Log.i(TAG, String.format("type:%d, class:%s, describe:%s, text:%s",
                 eventType, className, describeContent, text));
-        justWakeupAndRelease();
+        //justWakeupAndRelease(); //bugs todo java.lang.RuntimeException: WakeLock under-locked no-man-duty-entrance
         switch (eventType) {
             case AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED:
                 // Leave it to NotificationListener
@@ -283,18 +306,20 @@ public class MonitorEntrance extends AccessibilityService {
                 if (VIDEO_WINDOW.equals(className)) {
                     pickUp();
                 } else if (CHAT_WINDOW.equals(className)) {
-                    if (AccessibilityHelper.findEditTextAndPaste(this, "Wait for a minute.")) {
+                    /*if (AccessibilityHelper.findEditTextAndPaste(this, "Wait for a minute.")) {
                         send();
-                    }
+                    }*/
                 } else if (TEXT_PREVIEW_WINDOW.equals(className)) {
-                    List<AccessibilityNodeInfo> list = getRootInActiveWindow().findAccessibilityNodeInfosByViewId(TEXT_PREVIEW_ID);
+                    AccessibilityNodeInfo root = getRootInActiveWindow();
+                    if (null == root) break;
+                    List<AccessibilityNodeInfo> list = root.findAccessibilityNodeInfosByViewId(TEXT_PREVIEW_ID);
                     if (null == list || 0 == list.size()) {
                         Log.e(TAG, "cannot find TextView!");
                         break;
                     }
                     c = list.get(0).getText();
                     if (null != c) {
-                        handleLatestChatContent(c.toString());
+                        handleLatestMessage(c.toString());
                     } else {
                         Log.e(TAG, "Preview text is null!");
                     }
@@ -383,6 +408,11 @@ public class MonitorEntrance extends AccessibilityService {
         Toast.makeText(this, interrupted, Toast.LENGTH_LONG).show();
     }
 
+    private static MonitorEntrance sInstance;
+    public static MonitorEntrance getService() {
+        return sInstance;
+    }
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
@@ -393,6 +423,7 @@ public class MonitorEntrance extends AccessibilityService {
         //mKeyguardMgr = (KeyguardManager)getSystemService(Context.KEYGUARD_SERVICE);
         //mKeyguardLock = mKeyguardMgr.newKeyguardLock("unLock");
         //player = MediaPlayer.create(this, R.raw.songtip_m);
+        sInstance = this;
         ensureNotificationListenerAuthority();
         Toast.makeText(this, on, Toast.LENGTH_LONG).show();
     }
@@ -400,6 +431,7 @@ public class MonitorEntrance extends AccessibilityService {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        sInstance = null;
         String off = getResources().getString(R.string.robot_is_off);
         Log.i(TAG, off);
         Toast.makeText(this, off, Toast.LENGTH_LONG).show();

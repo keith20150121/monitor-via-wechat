@@ -6,21 +6,79 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.EditText;
+
+import java.util.LinkedList;
+
+import static android.content.Context.CLIPBOARD_SERVICE;
 
 public class AccessibilityHelper {
     public interface ConditionCallback {
         boolean onNodeInfoFound(AccessibilityNodeInfo info, Object... args);
     }
 
-    public static class AccessibilityEventSequence {
-        private int[] mEvents;
-        private int mIndex = 0;
+    public static class EventStash {
+        public static class Sequence {
+            public interface Callback {
+                boolean onCompleted(AccessibilityEvent event);
+            }
 
-        public AccessibilityEventSequence(int... eventType) {
-            if (null != eventType) {
+            protected final int[] mEvents;
+            protected final Callback mCallback;
+            protected int mIndex = 0;
 
+            public Sequence(Callback callback, int... types) {
+                mCallback = callback;
+                mEvents = new int[types.length];
+                System.arraycopy(types, 0, mEvents, 0, types.length);
+            }
+
+            public boolean expectedOtherwiseRemove(AccessibilityEvent event) {
+                Log.d(TAG, String.format("event:%d, expected:%d(index:%d)",
+                        event.getEventType(), mEvents[mIndex], mIndex));
+                final int current = mEvents[mIndex];
+                return event.getEventType() == current;
+            }
+
+            protected boolean process(AccessibilityEvent event) {
+                final int current = mEvents[mIndex];
+                if (event.getEventType() == current) {
+                    if (++mIndex == mEvents.length) {
+                        if (mCallback.onCompleted(event)) {
+                            return true;
+                        } else {
+                            mIndex = 0;
+                        }
+                    }
+                }
+                return false;
+            }
+        }
+
+        private final LinkedList<Sequence> mList = new LinkedList<>();
+
+        public void push(Sequence.Callback callback, int... eventTypes) {
+            if (null == eventTypes) return;
+            Sequence sequence = new Sequence(callback, eventTypes);
+            mList.push(sequence);
+        }
+
+        public void push(Sequence sequence) {
+            mList.push(sequence);
+        }
+
+        public void process(AccessibilityEvent event) {
+            for (Sequence sequence : mList) {
+                if (!sequence.expectedOtherwiseRemove(event)) {
+                    mList.remove(sequence);
+                    continue;
+                }
+
+                if (sequence.process(event)) {
+                    mList.remove(sequence);
+                }
             }
         }
     }
@@ -31,9 +89,9 @@ public class AccessibilityHelper {
         performActionUpwards(nodeInfo, AccessibilityNodeInfo.ACTION_CLICK);
     }
 
-    public static void performLongClick(AccessibilityNodeInfo nodeInfo) {
-        performActionUpwards(nodeInfo, AccessibilityNodeInfo.ACTION_LONG_CLICK);
-    }
+    //public static void performLongClick(AccessibilityNodeInfo nodeInfo) {
+    //    performActionUpwards(nodeInfo, AccessibilityNodeInfo.ACTION_LONG_CLICK);
+    //}
 
     public static void performActionUpwards(AccessibilityNodeInfo nodeInfo, int action) {
         if (nodeInfo == null) {
@@ -105,6 +163,14 @@ public class AccessibilityHelper {
     public static boolean findEditTextAndPaste(AccessibilityService service, String content) {
         AccessibilityNodeInfo rootNode = service.getRootInActiveWindow();
         if (rootNode == null) return false;
-        return null != AccessibilityHelper.find(rootNode, sEditTextFinder, content, service.getSystemService(Context.CLIPBOARD_SERVICE));
+        return null != AccessibilityHelper.find(rootNode, sEditTextFinder, content, service.getSystemService(CLIPBOARD_SERVICE));
+    }
+
+    public static String fromClipboard(Context context) {
+        ClipboardManager cm = (ClipboardManager)context.getSystemService(CLIPBOARD_SERVICE);
+        ClipData data = cm.getPrimaryClip();
+        ClipData.Item item = data.getItemAt(0);
+        String content = item.getText().toString();
+        return content;
     }
 }

@@ -26,7 +26,9 @@ public class NotificationListener extends NotificationListenerService {
         try {
             Notification notification = sbn.getNotification();
             PendingIntent pendingIntent = notification.contentIntent;
-            pendingIntent.send();
+            if (null != pendingIntent) {
+                pendingIntent.send();
+            }
         } catch (PendingIntent.CanceledException e) {
             e.printStackTrace();
         }
