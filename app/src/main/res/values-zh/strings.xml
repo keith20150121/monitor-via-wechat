@@ -10,4 +10,5 @@
     <string name="robot_is_on">机器人上线了。</string>
     <string name="robot_is_off">机器人下线了。</string>
     <string name="robot_is_interrupted">机器人被中断，被迫退出。</string>
+    <string name="robot_cannot_find_edit_textbox">没找到发送信息所需的编辑框，信息发送失败。</string>
 </resources>

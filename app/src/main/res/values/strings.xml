@@ -13,4 +13,5 @@
     <string name="robot_is_on">Robot is on.</string>
     <string name="robot_is_off">Robot is off.</string>
     <string name="robot_is_interrupted">Robot is interrupted.</string>
+    <string name="robot_cannot_find_edit_textbox">Cannot find edit textbox. Failed to reply message.</string>
 </resources>
