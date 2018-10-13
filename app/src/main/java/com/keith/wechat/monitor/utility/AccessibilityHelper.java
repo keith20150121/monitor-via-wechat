@@ -40,6 +40,10 @@ public class AccessibilityHelper {
             mList.push(sequence);
         }
 
+        public void remove(ISequence sequence) {
+            mList.remove(sequence);
+        }
+
         public void process(AccessibilityEvent event) {
             for (ISequence sequence : mList) {
                 if (!sequence.expectedOtherwiseRemove(event)) {

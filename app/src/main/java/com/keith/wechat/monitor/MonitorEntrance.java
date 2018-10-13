@@ -5,6 +5,7 @@ import java.util.Calendar;
 import java.util.LinkedList;
 import java.util.List;
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.PendingIntent.CanceledException;
@@ -84,8 +85,12 @@ public class MonitorEntrance extends AccessibilityService {
     }
 
     private void executeDelayed(Runnable r, long timeout) {
+        executeDelayed(r, MainThreadHandler.MSG_RUNNABLE, timeout);
+    }
+
+    private void executeDelayed(Runnable r, int what, long timeout) {
         Message msg = Message.obtain();
-        msg.what = MainThreadHandler.MSG_RUNNABLE;
+        msg.what = what;
         msg.obj = r;
         mHandler.sendMessageDelayed(msg, timeout);
     }
@@ -173,9 +178,9 @@ public class MonitorEntrance extends AccessibilityService {
                 Log.d(TAG, "mLatestChatContentFinder.onNodeInfoFound:" + info.getText());
                 if (mCopy.equals(info.getText())) {
                     AccessibilityHelper.performClick(info);
+                    mStash.push(mFromClipboard, AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED);
                     return true;
                 }
-                mStash.push(mFromClipboard, AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED);
                 return false;
             }
         };
@@ -186,6 +191,9 @@ public class MonitorEntrance extends AccessibilityService {
             public boolean onCompleted(AccessibilityEvent event) {
                 if (AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED == event.getEventType()) {
                     if ("android.widget.Toast$TN".contentEquals(event.getClassName())) {
+                        MonitorEntrance.this.mHandler.removeMessages(
+                                MainThreadHandler.MSG_TIMEOUT_LONGCLICK_LATEST_CONTENT);
+
                         MonitorEntrance.this.dispatchTextMessage(
                                 AccessibilityHelper.fromClipboard(MonitorEntrance.this));
                         return true;
@@ -206,6 +214,15 @@ public class MonitorEntrance extends AccessibilityService {
                 }
             }
             return false;
+        }
+    };
+
+    private MultiModeSequence mLongClickLatestContentSequence;
+
+    private Runnable mLongClickLatestChatContentRunnable = new Runnable() {
+        @Override
+        public void run() {
+            MonitorEntrance.this.LongClickLatestChatContent();
         }
     };
 
@@ -238,21 +255,34 @@ public class MonitorEntrance extends AccessibilityService {
         last.performAction(AccessibilityNodeInfo.ACTION_SELECT);
         last.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK);
 
-        MultiModeSequence sequence = new MultiModeSequence(
-                mLatestMessageCallback,
-                new int[] {
+        if (null == mLongClickLatestContentSequence) {
+            int[][] events = new int[3][];
+            events[0] = new int[] {
                     AccessibilityEvent.TYPE_VIEW_SELECTED,
                     AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
                     AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
                     AccessibilityEvent.TYPE_VIEW_SCROLLED
-                }, new int[] {
+            };
+            events[1] = new int[] {
                     AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
                     AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
                     AccessibilityEvent.TYPE_VIEW_SELECTED,
                     AccessibilityEvent.TYPE_VIEW_SCROLLED
-                }
-        );
-        mStash.push(sequence);
+            };
+            events[2] = new int[] {
+                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                    AccessibilityEvent.TYPE_VIEW_SELECTED,
+                    AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            };
+            mLongClickLatestContentSequence = new MultiModeSequence(events, mLatestMessageCallback);
+        }
+
+        mStash.push(mLongClickLatestContentSequence);
+
+        executeDelayed(mLongClickLatestChatContentRunnable,
+                MainThreadHandler.MSG_TIMEOUT_LONGCLICK_LATEST_CONTENT, 1000);
         /*mStash.push(mLatestMessageCallback,
                 AccessibilityEvent.TYPE_VIEW_SELECTED,
                 AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
@@ -262,6 +292,7 @@ public class MonitorEntrance extends AccessibilityService {
 
     static class MainThreadHandler extends Handler {
         public static final int MSG_RUNNABLE = 200;
+        public static final int MSG_TIMEOUT_LONGCLICK_LATEST_CONTENT = 201;
 
         private WeakReference<MonitorEntrance> mService;
 
@@ -278,6 +309,9 @@ public class MonitorEntrance extends AccessibilityService {
                 return;
             }
             switch (msg.what) {
+                case MSG_TIMEOUT_LONGCLICK_LATEST_CONTENT:
+                    service.mStash.remove(service.mLongClickLatestContentSequence);
+                    service.mLongClickLatestContentSequence.reset();
                 case MSG_RUNNABLE:
                     Runnable r =  (Runnable)msg.obj;
                     if (null != r) {
@@ -412,8 +446,8 @@ public class MonitorEntrance extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        //AccessibilityServiceInfo info = getServiceInfo();
-        //info.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+        AccessibilityServiceInfo info = getServiceInfo();
+        info.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
         String on = getResources().getString(R.string.robot_is_on);
         Log.i(TAG, on);
         mPowerMgr =(PowerManager)getSystemService(Context.POWER_SERVICE);

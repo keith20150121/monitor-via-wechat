@@ -16,12 +16,21 @@ public class MultiModeSequence implements AccessibilityHelper.EventStash.ISequen
     protected final LinkedList<int[]> mPreferredList = new LinkedList<>();
 
     public MultiModeSequence(Callback callback, int[]... types) {
+        this(types, callback);
+    }
+
+    public MultiModeSequence(int[][] types, Callback callback) {
         mCallback = callback;
         mTotal = new int[types.length][];
         System.arraycopy(types, 0, mTotal, 0, types.length);
     }
 
+
     protected boolean tryPresetEvents(int[] events, AccessibilityEvent event) {
+        if (mIndex >= events.length) {
+            Log.e(TAG, String.format("out of bound, index:%d, length:%d", mIndex, events.length));
+            return false;
+        }
         Log.d(TAG, String.format("event-type:%d, expected:%d(index:%d)",
                 event.getEventType(), events[mIndex], mIndex));
         final int current = events[mIndex];
@@ -51,16 +60,17 @@ public class MultiModeSequence implements AccessibilityHelper.EventStash.ISequen
         for (int[] types : mPreferredList) {
             if (event.getEventType() == types[mIndex]) {
                 if (++mIndex == types.length) {
-                    if (mCallback.onCompleted(event)) {
-                        return true;
-                    } else {
-                        mIndex = 0;
-                        mPreferredList.clear();
-                    }
+                    reset();
+                    return mCallback.onCompleted(event);
                 }
             }
         }
         return false;
+    }
+
+    public void reset() {
+        mIndex = 0;
+        mPreferredList.clear();
     }
 
 }
