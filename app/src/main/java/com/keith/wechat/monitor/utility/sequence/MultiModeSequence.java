@@ -3,11 +3,9 @@ package com.keith.wechat.monitor.utility.sequence;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 
-import com.keith.wechat.monitor.utility.AccessibilityHelper;
-
 import java.util.LinkedList;
 
-public class MultiModeSequence implements AccessibilityHelper.EventStash.ISequence {
+public class MultiModeSequence implements EventStash.ISequence {
     private static final String TAG = "no-man-mms";
 
     protected int mIndex;

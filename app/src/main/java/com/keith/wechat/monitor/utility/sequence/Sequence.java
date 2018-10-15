@@ -3,19 +3,11 @@ package com.keith.wechat.monitor.utility.sequence;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 
-import com.keith.wechat.monitor.utility.AccessibilityHelper;
-
-public class Sequence implements AccessibilityHelper.EventStash.ISequence {
+public class Sequence extends BaseSequence {
     private static final String TAG = "no-man-s";
 
-    protected final int[] mEvents;
-    protected final Callback mCallback;
-    protected int mIndex = 0;
-
     public Sequence(Callback callback, int... types) {
-        mCallback = callback;
-        mEvents = new int[types.length];
-        System.arraycopy(types, 0, mEvents, 0, types.length);
+        super(callback, types);
     }
 
     @Override

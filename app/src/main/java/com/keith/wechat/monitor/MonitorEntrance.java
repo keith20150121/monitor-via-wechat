@@ -20,14 +20,12 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
-import android.widget.ListView;
 import android.widget.Toast;
 
 import com.keith.wechat.monitor.utility.AccessibilityHelper;
-import com.keith.wechat.monitor.utility.sequence.MultiModeSequence;
+import com.keith.wechat.monitor.utility.sequence.EventStash;
 import com.keith.wechat.monitor.utility.Shell;
 import com.keith.wechat.monitor.utility.WechatManAccessHelper;
-import com.keith.wechat.monitor.utility.sequence.Sequence;
 
 public class MonitorEntrance extends AccessibilityService {
     private static final String TAG = "no-man-duty-entrance";
@@ -36,14 +34,13 @@ public class MonitorEntrance extends AccessibilityService {
     public static final String TEXT_PREVIEW_WINDOW = "com.tencent.mm.ui.chatting.TextPreviewUI";
     public static final String TEXT_PREVIEW_ID = "com.tencent.mm:id/ann";
     public static final String CHAT_WINDOW = "com.tencent.mm.ui.LauncherUI";
-    public static final String CHAT_LIST = "com.tencent.mm:id/mq";
 
     //private KeyguardManager mKeyguardMgr;
     //private KeyguardLock mKeyguardLock;
     private PowerManager mPowerMgr;
     private PowerManager.WakeLock mWakeupLock = null;
 
-    private final AccessibilityHelper.EventStash mStash = new AccessibilityHelper.EventStash();
+    private final EventStash mStash = new EventStash();
     private final LinkedList<TextMessageReceiver> mTextMessageReceivers =
             new LinkedList<>();
 
@@ -52,6 +49,21 @@ public class MonitorEntrance extends AccessibilityService {
     private String mSender;
     private AccessibilityNodeInfo mSenderInfo;
     private String mContent;
+
+    private final WechatManAccessHelper.LauncherUIChat.LatestMessage mLatestMessage =
+            new WechatManAccessHelper.LauncherUIChat.LatestMessage();
+
+    public void push(EventStash.ISequence.Callback callback, int... eventTypes) {
+        mStash.push(callback, eventTypes);
+    }
+
+    public void push(EventStash.ISequence sequence) {
+        mStash.push(sequence);
+    }
+
+    public void remove(EventStash.ISequence sequence) {
+        mStash.remove(sequence);
+    }
 
     public interface TextMessageReceiver {
         String onTextMessageReceived(String content, String id);
@@ -85,15 +97,19 @@ public class MonitorEntrance extends AccessibilityService {
         //Toast.makeText(this, content, Toast.LENGTH_SHORT).show();
     }
 
-    private void executeDelayed(Runnable r, long timeout) {
+    public void executeDelayed(Runnable r, long timeout) {
         executeDelayed(r, MainThreadHandler.MSG_RUNNABLE, timeout);
     }
 
-    private void executeDelayed(Runnable r, int what, long timeout) {
+    public void executeDelayed(Runnable r, int what, long timeout) {
         Message msg = Message.obtain();
         msg.what = what;
         msg.obj = r;
         mHandler.sendMessageDelayed(msg, timeout);
+    }
+
+    public void removeMessages(int what) {
+        mHandler.removeMessages(what);
     }
 
     private final Runnable mDelayReleaseWakeLock = new Runnable() {
@@ -165,189 +181,11 @@ public class MonitorEntrance extends AccessibilityService {
         return ret;
     }
 
-    private AccessibilityHelper.EventStash.ISequence.Callback mLatestMessageCallback =
-            new AccessibilityHelper.EventStash.ISequence.Callback() {
-        private AccessibilityHelper.ConditionCallback mLatestChatContentFinder =
-                new AccessibilityHelper.ConditionCallback() {
-            private String mCopy;
 
-            @Override
-            public boolean onNodeInfoFound(AccessibilityNodeInfo info, Object... args) {
-                if (null == mCopy) {
-                    mCopy = MonitorEntrance.this.getResources().getString(R.string.wechat_copy);
-                }
-                Log.d(TAG, "mLatestChatContentFinder.onNodeInfoFound:" + info.getText());
-                if (mCopy.equals(info.getText())) {
-                    AccessibilityHelper.performClick(info);
-                    mStash.push(mFromClipboard, AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED);
-                    return true;
-                }
-                return false;
-            }
-        };
-
-        private AccessibilityHelper.EventStash.ISequence.Callback mFromClipboard =
-                new AccessibilityHelper.EventStash.ISequence.Callback() {
-            @Override
-            public boolean onCompleted(AccessibilityEvent event) {
-                if (AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED == event.getEventType()) {
-                    if ("android.widget.Toast$TN".contentEquals(event.getClassName())) {
-                        MonitorEntrance.this.mHandler.removeMessages(
-                                MainThreadHandler.MSG_TIMEOUT_LONGCLICK_LATEST_CONTENT);
-
-                        MonitorEntrance.this.dispatchTextMessage(
-                                AccessibilityHelper.fromClipboard(MonitorEntrance.this));
-                        return true;
-                    }
-                }
-                return true;
-            }
-        };
-
-        @Override
-        public boolean onCompleted(AccessibilityEvent event) {
-            Log.d(TAG, "mLatestMessageCallback onCompleted");
-            if (AccessibilityEvent.TYPE_VIEW_SCROLLED == event.getEventType()) {
-                final String name = ListView.class.getName();
-                if (name.contentEquals(event.getClassName())) {
-                    AccessibilityHelper.find(getRootInActiveWindow(), mLatestChatContentFinder);
-                    return true;
-                }
-            }
-            return false;
-        }
-    };
-
-    static abstract class EventStashCallbakWithNode
-            implements AccessibilityHelper.EventStash.ISequence.Callback {
-
-        protected AccessibilityNodeInfo mNode;
-
-        public void setArgs(AccessibilityNodeInfo node) {
-            mNode = node;
-        }
-    }
-
-    private EventStashCallbakWithNode mOnSelected = new EventStashCallbakWithNode() {
-        @Override
-        public boolean onCompleted(AccessibilityEvent event) {
-            mNode.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK);
-
-            int[] types = new int[] {
-            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
-                    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-                    AccessibilityEvent.TYPE_VIEW_SCROLLED };
-            mStash.push(new Sequence(mLatestMessageCallback, types));
-
-            return true;
-        }
-    };
-
-    private MultiModeSequence mLongClickLatestContentSequence;
-
-    private Runnable mLongClickLatestChatContentRunnable = new Runnable() {
-        @Override
-        public void run() {
-            MonitorEntrance.this.LongClickLatestChatContentSolution1();
-        }
-    };
-
-    private void LongClickLatestChatContentSolution2() {
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (null == root) return;
-        List<AccessibilityNodeInfo> ret =
-                root.findAccessibilityNodeInfosByViewId(CHAT_LIST);
-        if (null == ret) {
-            Log.d(TAG, "chat list return null!");
-            return;
-        }
-        final int count = ret.size();
-        Log.d(TAG, "id/mq count:" + count);
-        if (count == 0) {
-            return;
-        }
-
-        final AccessibilityNodeInfo last = ret.get(count - 1);
-        if (!WechatManAccessHelper.LauncherUIChat.isSender(this, last)) {
-            Log.d(TAG, "Not sender message, skip.");
-            return;
-        }
-        Log.d(TAG, "last:" + last.toString());
-
-        last.performAction(AccessibilityNodeInfo.ACTION_SELECT);
-
-        Sequence sequence = new Sequence(mOnSelected, AccessibilityEvent.TYPE_VIEW_SELECTED);
-        mOnSelected.setArgs(last);
-        mStash.push(sequence);
-    }
-
-    private void LongClickLatestChatContentSolution1() {
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (null == root) return;
-        List<AccessibilityNodeInfo> ret =
-                root.findAccessibilityNodeInfosByViewId(CHAT_LIST);
-        if (null == ret) {
-            Log.d(TAG, "chat list return null!");
-            return;
-        }
-        final int count = ret.size();
-        Log.d(TAG, "id/mq count:" + count);
-        if (count == 0) {
-            return;
-        }
-
-        /*for (AccessibilityNodeInfo i : ret) {
-            i.performAction(AccessibilityNodeInfo.ACTION_CLEAR_SELECTION);
-        }*/
-
-        final AccessibilityNodeInfo last = ret.get(count - 1);
-        if (!WechatManAccessHelper.LauncherUIChat.isSender(this, last)) {
-            Log.d(TAG, "Not sender message, skip.");
-            return;
-        }
-        Log.d(TAG, "last:" + last.toString());
-
-        last.performAction(AccessibilityNodeInfo.ACTION_SELECT);
-        last.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK);
-
-        if (null == mLongClickLatestContentSequence) {
-            int[][] events = new int[3][];
-            events[0] = new int[] {
-                    AccessibilityEvent.TYPE_VIEW_SELECTED,
-                    AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
-                    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-                    AccessibilityEvent.TYPE_VIEW_SCROLLED
-            };
-            events[1] = new int[] {
-                    AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
-                    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-                    AccessibilityEvent.TYPE_VIEW_SELECTED,
-                    AccessibilityEvent.TYPE_VIEW_SCROLLED
-            };
-            events[2] = new int[] {
-                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-                    AccessibilityEvent.TYPE_VIEW_SELECTED,
-                    AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
-                    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-            };
-            mLongClickLatestContentSequence = new MultiModeSequence(events, mLatestMessageCallback);
-        }
-
-        mStash.push(mLongClickLatestContentSequence);
-
-        executeDelayed(mLongClickLatestChatContentRunnable,
-                MainThreadHandler.MSG_TIMEOUT_LONGCLICK_LATEST_CONTENT, 1000);
-        /*mStash.push(mLatestMessageCallback,
-                AccessibilityEvent.TYPE_VIEW_SELECTED,
-                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
-                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-                AccessibilityEvent.TYPE_VIEW_SCROLLED);*/
-    }
-
-    static class MainThreadHandler extends Handler {
+    public static class MainThreadHandler extends Handler {
         public static final int MSG_RUNNABLE = 200;
-        public static final int MSG_TIMEOUT_LONGCLICK_LATEST_CONTENT = 201;
+        public static final int MSG_TIMEOUT = 201;
+        public static final int MSG_USER = 202;
 
         private WeakReference<MonitorEntrance> mService;
 
@@ -363,21 +201,23 @@ public class MonitorEntrance extends AccessibilityService {
                 Log.e(TAG, "service is dead.");
                 return;
             }
-            switch (msg.what) {
-                case MSG_TIMEOUT_LONGCLICK_LATEST_CONTENT:
-                    service.mStash.remove(service.mLongClickLatestContentSequence);
-                    service.mLongClickLatestContentSequence.reset();
+            if (msg.obj instanceof Runnable) {
+                Runnable r = (Runnable) msg.obj;
+                r.run();
+            }
+            /*switch (msg.what) {
+                case MSG_TIMEOUT:
                 case MSG_RUNNABLE:
                     Runnable r =  (Runnable)msg.obj;
                     if (null != r) {
                         r.run();
                     }
                     break;
-            }
+            }*/
         }
     }
 
-    private MainThreadHandler mHandler = new MainThreadHandler(this);
+    public MainThreadHandler mHandler = new MainThreadHandler(this);
 
     //播放提示声音
     private MediaPlayer player;
@@ -451,7 +291,7 @@ public class MonitorEntrance extends AccessibilityService {
             }
             break;
             case AccessibilityEvent.TYPE_VIEW_SCROLLED: {
-                LongClickLatestChatContentSolution1();
+                mLatestMessage.simulateManualAccess();
             }
             break;
             case AccessibilityEvent.TYPE_VIEW_CLICKED: {
@@ -487,10 +327,18 @@ public class MonitorEntrance extends AccessibilityService {
         }
     }
 
+    public void LogAndShowToast(String text) {
+        Log.d(TAG, text);
+        Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+    }
+
+    public void LogAndShowToast(int id) {
+        LogAndShowToast(getResources().getString(id));
+    }
+
     @Override
     public void onInterrupt() {
-        String interrupted = getResources().getString(R.string.robot_is_interrupted);
-        Toast.makeText(this, interrupted, Toast.LENGTH_LONG).show();
+        LogAndShowToast(R.string.robot_is_interrupted);
     }
 
     private static MonitorEntrance sInstance;
@@ -501,28 +349,23 @@ public class MonitorEntrance extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        mLatestMessage.register(this);
         AccessibilityServiceInfo info = getServiceInfo();
         info.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
-        String on = getResources().getString(R.string.robot_is_on);
-        Log.i(TAG, on);
         mPowerMgr =(PowerManager)getSystemService(Context.POWER_SERVICE);
         mWakeupLock = mPowerMgr.newWakeLock(PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, TAG);
-        //mKeyguardMgr = (KeyguardManager)getSystemService(Context.KEYGUARD_SERVICE);
-        //mKeyguardLock = mKeyguardMgr.newKeyguardLock("unLock");
-        //player = MediaPlayer.create(this, R.raw.songtip_m);
         sInstance = this;
+        LogAndShowToast(R.string.robot_is_on);
         ensureNotificationListenerAuthority();
         registerTextMessageReceiver(mCommandParser);
-        Toast.makeText(this, on, Toast.LENGTH_LONG).show();
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
+        mLatestMessage.unregister();
         sInstance = null;
-        String off = getResources().getString(R.string.robot_is_off);
-        Log.i(TAG, off);
+        LogAndShowToast(R.string.robot_is_off);
         unregisterTextMessageReceiver(mCommandParser);
-        Toast.makeText(this, off, Toast.LENGTH_LONG).show();
     }
 }

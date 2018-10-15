@@ -19,45 +19,6 @@ public class AccessibilityHelper {
         boolean onNodeInfoFound(AccessibilityNodeInfo info, Object... args);
     }
 
-    public static class EventStash {
-        public interface ISequence {
-            public interface Callback {
-                boolean onCompleted(AccessibilityEvent event);
-            }
-            boolean expectedOtherwiseRemove(AccessibilityEvent event);
-            boolean process(AccessibilityEvent event);
-        }
-
-        private final LinkedList<ISequence> mList = new LinkedList<>();
-
-        public void push(ISequence.Callback callback, int... eventTypes) {
-            if (null == eventTypes) return;
-            Sequence sequence = new Sequence(callback, eventTypes);
-            mList.push(sequence);
-        }
-
-        public void push(ISequence sequence) {
-            mList.push(sequence);
-        }
-
-        public void remove(ISequence sequence) {
-            mList.remove(sequence);
-        }
-
-        public void process(AccessibilityEvent event) {
-            for (ISequence sequence : mList) {
-                if (!sequence.expectedOtherwiseRemove(event)) {
-                    mList.remove(sequence);
-                    continue;
-                }
-
-                if (sequence.process(event)) {
-                    mList.remove(sequence);
-                }
-            }
-        }
-    }
-
     private static final String TAG = "no-man-duty-ash";
 
     public static void performClick(AccessibilityNodeInfo nodeInfo) {

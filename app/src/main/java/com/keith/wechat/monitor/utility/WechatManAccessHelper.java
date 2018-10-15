@@ -10,11 +10,18 @@ import android.os.Bundle;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.WindowManager;
+import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.ListView;
 
+import com.keith.wechat.monitor.MonitorEntrance;
 import com.keith.wechat.monitor.R;
+import com.keith.wechat.monitor.utility.sequence.EventStash;
+import com.keith.wechat.monitor.utility.sequence.MultiModeSequence;
+import com.keith.wechat.monitor.utility.sequence.Sequence;
+import com.keith.wechat.monitor.utility.sequence.UntilSequence;
 
 import java.util.List;
 
@@ -23,6 +30,7 @@ import static android.content.Context.CLIPBOARD_SERVICE;
 
 public class WechatManAccessHelper {
     private static final String TAG = "no-man-duty-wmah";
+    public static final String CHAT_LIST = "com.tencent.mm:id/mq";
 
     public static class LauncherUIChat {
         private static final AccessibilityHelper.ConditionCallback sEditTextFinder = new AccessibilityHelper.ConditionCallback() {
@@ -137,6 +145,200 @@ public class WechatManAccessHelper {
             }
             Log.e(TAG, "error?");
             return true;
+        }
+
+        public static class LatestMessage {
+            private MonitorEntrance mHost;
+
+            public void register(MonitorEntrance host) {
+                mHost = host;
+            }
+
+            public void unregister() {
+                mHost = null;
+            }
+
+            private EventStash.ISequence.Callback mLatestMessageCallback =
+                    new EventStash.ISequence.Callback() {
+                        private final AccessibilityHelper.ConditionCallback mLatestChatContentFinder =
+                                new AccessibilityHelper.ConditionCallback() {
+                                    private String mCopy;
+
+                                    @Override
+                                    public boolean onNodeInfoFound(AccessibilityNodeInfo info, Object... args) {
+                                        if (null == mCopy) {
+                                            mCopy = mHost.getResources().getString(R.string.wechat_copy);
+                                        }
+                                        Log.d(TAG, "mLatestChatContentFinder.onNodeInfoFound:" + info.getText());
+                                        if (mCopy.equals(info.getText())) {
+                                            AccessibilityHelper.performClick(info);
+                                            mHost.push(mFromClipboard, AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED);
+                                            return true;
+                                        }
+                                        return false;
+                                    }
+                                };
+
+                        private final EventStash.ISequence.Callback mFromClipboard =
+                                new EventStash.ISequence.Callback() {
+                                    @Override
+                                    public boolean onCompleted(AccessibilityEvent event) {
+                                        if (AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED == event.getEventType()) {
+                                            if ("android.widget.Toast$TN".contentEquals(event.getClassName())) {
+                                                mHost.removeMessages(MSG_TIMEOUT_RETRY);
+                                                mHost.dispatchTextMessage(AccessibilityHelper.fromClipboard(mHost));
+                                                return true;
+                                            }
+                                        }
+                                        return true;
+                                    }
+                                };
+
+                        @Override
+                        public boolean onCompleted(AccessibilityEvent event) {
+                            Log.d(TAG, "mLatestMessageCallback onCompleted");
+                            if (AccessibilityEvent.TYPE_VIEW_SCROLLED == event.getEventType()) {
+                                final String name = ListView.class.getName();
+                                if (name.contentEquals(event.getClassName())) {
+                                    AccessibilityHelper.find(mHost.getRootInActiveWindow(), mLatestChatContentFinder);
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+                    };
+
+            static abstract class EventStashCallbackWithNode
+                    implements EventStash.ISequence.Callback {
+                protected AccessibilityNodeInfo mNode;
+
+                public void setArgs(AccessibilityNodeInfo node) {
+                    mNode = node;
+                }
+            }
+
+            private EventStashCallbackWithNode mOnSelectedEvent = new EventStashCallbackWithNode() {
+                @Override
+                public boolean onCompleted(AccessibilityEvent event) {
+                    mNode.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK);
+
+                    int[] types = new int[] {
+                            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                            AccessibilityEvent.TYPE_VIEW_SCROLLED };
+                    LatestMessage.this.mHost.push(new Sequence(mLatestMessageCallback, types));
+
+                    return true;
+                }
+            };
+
+            private MultiModeSequence mManualAccessSequence;
+            private final Runnable mManualAccessRetryRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    if (null == mHost) {
+                        Log.e(TAG, "Runnable:mHost is null!");
+                        return;
+                    }
+                    LatestMessage.this.mHost.remove(mManualAccessSequence);
+                    mManualAccessSequence.reset();
+                    LatestMessage.this.simulateManualAccess();
+                }
+            };
+
+            private static final int MSG_TIMEOUT_RETRY = MonitorEntrance.MainThreadHandler.MSG_USER + 1;
+            public void simulateManualAccess() {
+                AccessibilityNodeInfo root = mHost.getRootInActiveWindow();
+                if (null == root) return;
+                List<AccessibilityNodeInfo> ret =
+                        root.findAccessibilityNodeInfosByViewId(CHAT_LIST);
+                if (null == ret) {
+                    Log.d(TAG, "chat list return null!");
+                    return;
+                }
+                final int count = ret.size();
+                Log.d(TAG, "id/mq count:" + count);
+                if (count == 0) {
+                    return;
+                }
+
+                final AccessibilityNodeInfo last = ret.get(count - 1);
+                if (!WechatManAccessHelper.LauncherUIChat.isSender(mHost, last)) {
+                    Log.d(TAG, "Not sender message, skip.");
+                    return;
+                }
+                Log.d(TAG, "last:" + last.toString());
+
+                last.performAction(AccessibilityNodeInfo.ACTION_SELECT);
+
+                UntilSequence sequence = new UntilSequence(mOnSelectedEvent,
+                        AccessibilityEvent.TYPE_VIEW_SELECTED);
+                mOnSelectedEvent.setArgs(last);
+                mHost.push(sequence);
+            }
+
+            public void simulateManualAccess2() {
+                AccessibilityNodeInfo root = mHost.getRootInActiveWindow();
+                if (null == root) return;
+                List<AccessibilityNodeInfo> ret =
+                        root.findAccessibilityNodeInfosByViewId(CHAT_LIST);
+                if (null == ret) {
+                    Log.d(TAG, "chat list return null!");
+                    return;
+                }
+                final int count = ret.size();
+                Log.d(TAG, "id/mq count:" + count);
+                if (count == 0) {
+                    return;
+                }
+
+                /*for (AccessibilityNodeInfo i : ret) {
+                    i.performAction(AccessibilityNodeInfo.ACTION_CLEAR_SELECTION);
+                }*/
+
+                final AccessibilityNodeInfo last = ret.get(count - 1);
+                if (!WechatManAccessHelper.LauncherUIChat.isSender(mHost, last)) {
+                    Log.d(TAG, "Not sender message, skip.");
+                    return;
+                }
+                Log.d(TAG, "last:" + last.toString());
+
+                last.performAction(AccessibilityNodeInfo.ACTION_SELECT);
+                last.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK);
+
+                if (null == mManualAccessSequence) {
+                    int[][] events = new int[3][];
+                    events[0] = new int[] {
+                            AccessibilityEvent.TYPE_VIEW_SELECTED,
+                            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                            AccessibilityEvent.TYPE_VIEW_SCROLLED
+                    };
+                    events[1] = new int[] {
+                            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                            AccessibilityEvent.TYPE_VIEW_SELECTED,
+                            AccessibilityEvent.TYPE_VIEW_SCROLLED
+                    };
+                    events[2] = new int[] {
+                            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                            AccessibilityEvent.TYPE_VIEW_SELECTED,
+                            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                    };
+                    mManualAccessSequence = new MultiModeSequence(events, mLatestMessageCallback);
+                }
+
+                mHost.push(mManualAccessSequence);
+                mHost.executeDelayed(mManualAccessRetryRunnable, MSG_TIMEOUT_RETRY, 1000);
+        /*mStash.push(mLatestMessageCallback,
+                AccessibilityEvent.TYPE_VIEW_SELECTED,
+                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                AccessibilityEvent.TYPE_VIEW_SCROLLED);*/
+            }
+
         }
     }
 
