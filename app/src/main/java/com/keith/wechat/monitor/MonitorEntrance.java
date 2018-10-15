@@ -27,6 +27,7 @@ import com.keith.wechat.monitor.utility.AccessibilityHelper;
 import com.keith.wechat.monitor.utility.sequence.MultiModeSequence;
 import com.keith.wechat.monitor.utility.Shell;
 import com.keith.wechat.monitor.utility.WechatManAccessHelper;
+import com.keith.wechat.monitor.utility.sequence.Sequence;
 
 public class MonitorEntrance extends AccessibilityService {
     private static final String TAG = "no-man-duty-entrance";
@@ -217,16 +218,70 @@ public class MonitorEntrance extends AccessibilityService {
         }
     };
 
+    static abstract class EventStashCallbakWithNode
+            implements AccessibilityHelper.EventStash.ISequence.Callback {
+
+        protected AccessibilityNodeInfo mNode;
+
+        public void setArgs(AccessibilityNodeInfo node) {
+            mNode = node;
+        }
+    }
+
+    private EventStashCallbakWithNode mOnSelected = new EventStashCallbakWithNode() {
+        @Override
+        public boolean onCompleted(AccessibilityEvent event) {
+            mNode.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK);
+
+            int[] types = new int[] {
+            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+                    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                    AccessibilityEvent.TYPE_VIEW_SCROLLED };
+            mStash.push(new Sequence(mLatestMessageCallback, types));
+
+            return true;
+        }
+    };
+
     private MultiModeSequence mLongClickLatestContentSequence;
 
     private Runnable mLongClickLatestChatContentRunnable = new Runnable() {
         @Override
         public void run() {
-            MonitorEntrance.this.LongClickLatestChatContent();
+            MonitorEntrance.this.LongClickLatestChatContentSolution1();
         }
     };
 
-    private void LongClickLatestChatContent() {
+    private void LongClickLatestChatContentSolution2() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (null == root) return;
+        List<AccessibilityNodeInfo> ret =
+                root.findAccessibilityNodeInfosByViewId(CHAT_LIST);
+        if (null == ret) {
+            Log.d(TAG, "chat list return null!");
+            return;
+        }
+        final int count = ret.size();
+        Log.d(TAG, "id/mq count:" + count);
+        if (count == 0) {
+            return;
+        }
+
+        final AccessibilityNodeInfo last = ret.get(count - 1);
+        if (!WechatManAccessHelper.LauncherUIChat.isSender(this, last)) {
+            Log.d(TAG, "Not sender message, skip.");
+            return;
+        }
+        Log.d(TAG, "last:" + last.toString());
+
+        last.performAction(AccessibilityNodeInfo.ACTION_SELECT);
+
+        Sequence sequence = new Sequence(mOnSelected, AccessibilityEvent.TYPE_VIEW_SELECTED);
+        mOnSelected.setArgs(last);
+        mStash.push(sequence);
+    }
+
+    private void LongClickLatestChatContentSolution1() {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (null == root) return;
         List<AccessibilityNodeInfo> ret =
@@ -396,7 +451,7 @@ public class MonitorEntrance extends AccessibilityService {
             }
             break;
             case AccessibilityEvent.TYPE_VIEW_SCROLLED: {
-                LongClickLatestChatContent();
+                LongClickLatestChatContentSolution1();
             }
             break;
             case AccessibilityEvent.TYPE_VIEW_CLICKED: {
