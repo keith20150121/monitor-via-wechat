@@ -49,6 +49,10 @@ public class AccessibilityHelper {
 
 
     public static AccessibilityNodeInfo find(AccessibilityNodeInfo root, ConditionCallback callback, Object... args) {
+        if (null == root) {
+            Log.e(TAG, "root is null!");
+            return null;
+        }
         final int count = root.getChildCount();
         Log.d(TAG, String.format("root class=%s, text=%s, child:%d", root.getClassName(), root.getText(), count));
         AccessibilityNodeInfo ret = null;

@@ -291,7 +291,13 @@ public class MonitorEntrance extends AccessibilityService {
             }
             break;
             case AccessibilityEvent.TYPE_VIEW_SCROLLED: {
-                mLatestMessage.simulateManualAccess();
+                /*executeDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        MonitorEntrance.this.mLatestMessage.simulateManualAccess2();
+                    }
+                }, 1000);*/
+                mLatestMessage.simulateManualAccess2();
             }
             break;
             case AccessibilityEvent.TYPE_VIEW_CLICKED: {
@@ -350,8 +356,8 @@ public class MonitorEntrance extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         mLatestMessage.register(this);
-        AccessibilityServiceInfo info = getServiceInfo();
-        info.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+        //AccessibilityServiceInfo info = getServiceInfo();
+        //info.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS; flagIncludeNotImportantViews|
         mPowerMgr =(PowerManager)getSystemService(Context.POWER_SERVICE);
         mWakeupLock = mPowerMgr.newWakeLock(PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, TAG);
         sInstance = this;

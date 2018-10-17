@@ -3,6 +3,7 @@ package com.keith.wechat.monitor.utility.sequence;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 
+import java.util.ArrayList;
 import java.util.LinkedList;
 
 public class MultiModeSequence implements EventStash.ISequence {
@@ -35,14 +36,18 @@ public class MultiModeSequence implements EventStash.ISequence {
         return event.getEventType() == current;
     }
 
+    private final ArrayList<int[]> mToBeRemoved = new ArrayList<>();
     @Override
     public boolean expectedOtherwiseRemove(AccessibilityEvent event) {
         if (0 != mPreferredList.size()) {
+            mToBeRemoved.clear();
             for (int[] types : mPreferredList) {
                 if (!tryPresetEvents(types, event)) {
-                    mPreferredList.remove(types);
+                    //mPreferredList.remove(types);
+                    mToBeRemoved.add(types);
                 }
             }
+            mPreferredList.removeAll(mToBeRemoved);
         } else {
             for (int[] types : mTotal) {
                 if (tryPresetEvents(types, event)) {

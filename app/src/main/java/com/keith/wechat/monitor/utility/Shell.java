@@ -5,7 +5,21 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 
 public class Shell {
-    static public String exec(String cmd) {
+
+    public static class ExecRunnable implements Runnable {
+        private final String mCommand;
+
+        public ExecRunnable(String cmd) {
+            mCommand = cmd;
+        }
+
+        @Override
+        public void run() {
+            exec(mCommand);
+        }
+    }
+
+    public static String exec(String cmd) {
         Runtime runtime = Runtime.getRuntime();
         try {
             Process process = runtime.exec(cmd);
