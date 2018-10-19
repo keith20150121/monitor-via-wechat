@@ -24,6 +24,9 @@ public class MultiModeSequence implements EventStash.ISequence {
         System.arraycopy(types, 0, mTotal, 0, types.length);
     }
 
+    public Callback callback() {
+        return mCallback;
+    }
 
     protected boolean tryPresetEvents(int[] events, AccessibilityEvent event) {
         if (mIndex >= events.length) {

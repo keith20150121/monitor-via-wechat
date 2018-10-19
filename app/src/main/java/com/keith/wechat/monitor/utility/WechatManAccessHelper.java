@@ -22,6 +22,7 @@ import android.widget.ListView;
 import com.keith.wechat.monitor.MonitorEntrance;
 import com.keith.wechat.monitor.R;
 import com.keith.wechat.monitor.SimulateInput;
+import com.keith.wechat.monitor.utility.sequence.Any;
 import com.keith.wechat.monitor.utility.sequence.EventStash;
 import com.keith.wechat.monitor.utility.sequence.MultiModeSequence;
 import com.keith.wechat.monitor.utility.sequence.Sequence;
@@ -35,6 +36,15 @@ import static android.content.Context.CLIPBOARD_SERVICE;
 public class WechatManAccessHelper {
     private static final String TAG = "no-man-duty-wmah";
     public static final String CHAT_LIST = "com.tencent.mm:id/mq";
+    public static final int MAX_SWITCH_CAMERA_RETRY = 10;
+
+    public static void localAccess(Context context, String command) {
+        //Intent intent = new Intent(SimulateInput.ACTION_SIMULATION);
+        Intent intent = new Intent("_VA_protected_" + SimulateInput.ACTION_SIMULATION);
+        intent.putExtra("command", command);
+        intent.setPackage(context.getResources().getString(R.string.exposed_package));
+        context.sendBroadcast(intent);
+    }
 
     public static class LauncherUIChat {
         private static final AccessibilityHelper.ConditionCallback sEditTextFinder = new AccessibilityHelper.ConditionCallback() {
@@ -80,14 +90,6 @@ public class WechatManAccessHelper {
                 }
             }
 
-        }
-
-        public static void localAccess(Context context, String command) {
-            //Intent intent = new Intent(SimulateInput.ACTION_SIMULATION);
-            Intent intent = new Intent("_VA_protected_" + SimulateInput.ACTION_SIMULATION);
-            intent.putExtra("command", command);
-            intent.setPackage(context.getResources().getString(R.string.exposed_package));
-            context.sendBroadcast(intent);
         }
 
         public static boolean sendMessage(AccessibilityService service, String content) {
@@ -162,9 +164,14 @@ public class WechatManAccessHelper {
 
         public static class LatestMessage {
             private MonitorEntrance mHost;
+            private boolean mInitMessageId = false;
 
             public void register(MonitorEntrance host) {
                 mHost = host;
+                if (!mInitMessageId) {
+                    MSG_TIMEOUT_RETRY = host.generateMessageId();
+                    mInitMessageId = true;
+                }
             }
 
             public void unregister() {
@@ -224,15 +231,14 @@ public class WechatManAccessHelper {
                         }
                     };
 
-            static abstract class EventStashCallbackWithNode
-                    implements EventStash.ISequence.Callback {
-                protected AccessibilityNodeInfo mNode;
-                public void setArgs(AccessibilityNodeInfo node) {
-                    mNode = node;
-                }
-            }
+            private InterfaceWithArgs.SequenceCallbackWithArgs mOnSelectedEvent = new InterfaceWithArgs.SequenceCallbackWithArgs() {
+                private AccessibilityNodeInfo mNode;
 
-            private EventStashCallbackWithNode mOnSelectedEvent = new EventStashCallbackWithNode() {
+                @Override
+                public void setArgs(Object... args) {
+                    mNode = (AccessibilityNodeInfo)args[0];
+                }
+
                 private final Runnable mSimulateManualAccessRunnable = new Runnable() {
                     @Override
                     public void run() {
@@ -251,7 +257,7 @@ public class WechatManAccessHelper {
                     Sequence sequence = new Sequence(mLatestMessageCallback, types);
                     LatestMessage.this.mHost.push(sequence);
 
-                    final RunnableWithArgs r = new RunnableWithArgs() {
+                    final InterfaceWithArgs.RunnableWithArgs r = new InterfaceWithArgs.RunnableWithArgs() {
                         AccessibilityNodeInfo mNode;
                         Sequence mSequence;
 
@@ -339,33 +345,8 @@ public class WechatManAccessHelper {
 
             }
 
-            /*private final Runnable mManualAccessRetryRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    if (null == mHost) {
-                        Log.e(TAG, "Runnable:mHost is null!");
-                        return;
-                    }
-                    LatestMessage.this.mHost.remove(mManualAccessSequence);
-                    mManualAccessSequence.reset();
-                    //LatestMessage.this.simulateManualAccess2();
-                }
-            };*/
-
-            private static final int MSG_TIMEOUT_RETRY = MonitorEntrance.MainThreadHandler.MSG_USER + 1;
+            private int MSG_TIMEOUT_RETRY;
             private AccessibilityNodeInfo findLastChat() {
-                /*List<AccessibilityWindowInfo> windows =  mHost.getWindows();
-                Log.e(TAG, "windows:" + windows.size());
-                Rect r = new Rect();
-                AccessibilityNodeInfo root = null;
-                for (AccessibilityWindowInfo window : windows) {
-                    window.getBoundsInScreen(r);
-                    Log.e(TAG, r.toString());
-                    Log.e(TAG, "activate:" + window.isActive());
-                    if (window.isActive()) {
-                        root = window.getRoot();
-                    }
-                }*/
                 AccessibilityNodeInfo root = mHost.getRootInActiveWindow();
                 if (null == root) return null;
                 List<AccessibilityNodeInfo> ret =
@@ -401,7 +382,7 @@ public class WechatManAccessHelper {
                 mHost.push(sequence);
             }
 
-            private final RunnableWithArgs mClickNode = new RunnableWithArgs() {
+            private final InterfaceWithArgs.RunnableWithArgs mClickNode = new InterfaceWithArgs.RunnableWithArgs() {
                 private AccessibilityNodeInfo mNode;
 
                 @Override
@@ -424,7 +405,7 @@ public class WechatManAccessHelper {
                 mHost.executeDelayed(mClickNode, 100);
             }
 
-            public void simulateManualAccess2() {
+            public void proceed() {
                 AccessibilityNodeInfo last = findLastChat();
                 if (null == last) return;
 
@@ -473,18 +454,58 @@ public class WechatManAccessHelper {
                 Rect rect = new Rect();
                 last.getBoundsInScreen(rect);
                 Runnable r = new LongClickRetryRunnable(rect.centerX(), rect.centerY());
-                mHost.executeDelayed(r, MSG_TIMEOUT_RETRY, 1000);
-                /*mStash.push(mLatestMessageCallback,
-                AccessibilityEvent.TYPE_VIEW_SELECTED,
-                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
-                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-                AccessibilityEvent.TYPE_VIEW_SCROLLED);*/
+                mHost.executeDelayed(r, MSG_TIMEOUT_RETRY, Shell.determinateDelay(mHost));
             }
 
         }
     }
 
     public static class VideoActivity {
+        private MonitorEntrance mHost;
+        private boolean mInitMessageId = false;
+        private int MSG_TIMEOUT_SWITCH_CAMERA_REMOVE;
+
+        public void register(MonitorEntrance host) {
+            mHost = host;
+            if (!mInitMessageId) {
+                MSG_TIMEOUT_SWITCH_CAMERA_REMOVE = host.generateMessageId();
+                mInitMessageId = true;
+            }
+        }
+
+        public void unregister() {
+            mHost = null;
+        }
+
+        public boolean answerTheCall() {
+            return answerTheCall(mHost);
+        }
+
+        public void switchCamera() {
+            InterfaceWithArgs.SequenceCallbackWithArgs callback =
+                    resetSequenceAndGetCallback();
+            callback.setArgs(mHost, 0);
+            mHost.push(mSwitchCameraSequence);
+            setDelayPolicy();
+        }
+
+        private void setDelayPolicy() {
+            mHost.executeDelayed(mRemoveSwitchCameraRunnable,
+                    MSG_TIMEOUT_SWITCH_CAMERA_REMOVE, Shell.determinateDelay(mHost));
+        }
+
+        private final Runnable mRemoveSwitchCameraRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (null == mHost) {
+                    Log.e(TAG, "host is null!");
+                    return;
+                }
+                mHost.remove(mSwitchCameraSequence);
+                mSwitchCameraSequence.reset();
+            }
+        };
+
         public static boolean answerTheCall(AccessibilityService service) {
             AccessibilityNodeInfo nodeInfo = service.getRootInActiveWindow();
             if (nodeInfo == null) {
@@ -504,5 +525,83 @@ public class WechatManAccessHelper {
             }
             return false;
         }
+
+        //public static class Camera {
+
+        private boolean mTouchInLocal = false;
+        public void setTouchPolicy(boolean Xposed) {
+            mTouchInLocal = Xposed;
+        }
+
+        private final Any mSwitchCameraSequence = new Any(
+            new InterfaceWithArgs.SequenceCallbackWithArgs() {
+                private MonitorEntrance mService;
+                private int mTimes = 0;
+
+                @Override
+                public void setArgs(Object... args) {
+                    mService = (MonitorEntrance) args[0];
+                    mTimes = (int) args[1];
+                }
+
+                @Override
+                public boolean onCompleted(AccessibilityEvent event) {
+                    mService.removeMessages(MSG_TIMEOUT_SWITCH_CAMERA_REMOVE);
+                    boolean rr = switchCameraImpl();
+                    ++mTimes;
+                    Log.d(TAG, String.format("switchCameraImpl:%b, times:%d", rr, mTimes));
+                    return rr;
+                }
+
+                @Override
+                public Object get(int index) {
+                    return mTimes;
+                }
+            }/*, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED*/);
+
+        private InterfaceWithArgs.SequenceCallbackWithArgs
+        resetSequenceAndGetCallback() {
+            mHost.remove(mSwitchCameraSequence);
+            mSwitchCameraSequence.reset();
+            return (InterfaceWithArgs.SequenceCallbackWithArgs) mSwitchCameraSequence.callback();
+        }
+
+        private void switchCameraInternal() {
+            InterfaceWithArgs.SequenceCallbackWithArgs callback = resetSequenceAndGetCallback();
+            final int times = (int) callback.get(0);
+            if (times >= MAX_SWITCH_CAMERA_RETRY) {
+                Log.e(TAG, "switch Camera failed.");
+                return;
+            }
+            mHost.push(mSwitchCameraSequence);
+            setDelayPolicy();
+        }
+
+        private boolean switchCameraImpl() {
+            Log.d(TAG, "enter Switch Camera");
+            Resources r = mHost.getResources();
+            final String sc = r.getString(R.string.wechat_switch_camera);
+            List<AccessibilityWindowInfo> windows = mHost.getWindows();
+            List<AccessibilityNodeInfo> nodes;
+            Rect bound = new Rect();
+            for (AccessibilityWindowInfo window : windows) {
+                AccessibilityNodeInfo root = window.getRoot();
+                nodes = root.findAccessibilityNodeInfosByText(sc);
+                if (null != nodes && nodes.size() > 0) {
+                    if (mTouchInLocal) {
+                        nodes.get(0).getBoundsInScreen(bound);
+                        WechatManAccessHelper.localAccess(mHost, String.format(
+                                "input tap %d %d", bound.centerX(), bound.centerY()
+                        ));
+                    } else {
+                        AccessibilityHelper.performClick(nodes.get(0));
+                    }
+                    return true;
+                }
+            }
+            switchCameraInternal();
+            return false;
+        }
+        //}
     }
 }

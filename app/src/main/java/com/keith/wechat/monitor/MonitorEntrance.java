@@ -5,13 +5,11 @@ import java.util.Calendar;
 import java.util.LinkedList;
 import java.util.List;
 import android.accessibilityservice.AccessibilityService;
-import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.PendingIntent.CanceledException;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.Resources;
 import android.media.MediaPlayer;
 import android.os.Handler;
 import android.os.Message;
@@ -22,9 +20,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 
-import com.keith.wechat.monitor.utility.AccessibilityHelper;
 import com.keith.wechat.monitor.utility.sequence.EventStash;
-import com.keith.wechat.monitor.utility.Shell;
 import com.keith.wechat.monitor.utility.WechatManAccessHelper;
 
 public class MonitorEntrance extends AccessibilityService {
@@ -35,8 +31,6 @@ public class MonitorEntrance extends AccessibilityService {
     public static final String TEXT_PREVIEW_ID = "com.tencent.mm:id/ann";
     public static final String CHAT_WINDOW = "com.tencent.mm.ui.LauncherUI";
 
-    //private KeyguardManager mKeyguardMgr;
-    //private KeyguardLock mKeyguardLock;
     private PowerManager mPowerMgr;
     private PowerManager.WakeLock mWakeupLock = null;
 
@@ -46,12 +40,11 @@ public class MonitorEntrance extends AccessibilityService {
 
     private final CommandParser mCommandParser = new CommandParser();
 
-    private String mSender;
-    private AccessibilityNodeInfo mSenderInfo;
-    private String mContent;
-
     private final WechatManAccessHelper.LauncherUIChat.LatestMessage mLatestMessage =
             new WechatManAccessHelper.LauncherUIChat.LatestMessage();
+
+    private final WechatManAccessHelper.VideoActivity mVideo =
+            new WechatManAccessHelper.VideoActivity();
 
     public void push(EventStash.ISequence.Callback callback, int... eventTypes) {
         mStash.push(callback, eventTypes);
@@ -63,6 +56,10 @@ public class MonitorEntrance extends AccessibilityService {
 
     public void remove(EventStash.ISequence sequence) {
         mStash.remove(sequence);
+    }
+
+    public int generateMessageId() {
+        return mHandler.generateId();
     }
 
     public interface TextMessageReceiver {
@@ -138,11 +135,11 @@ public class MonitorEntrance extends AccessibilityService {
                     .getParcelableData();
             String content = notification.tickerText.toString();
             String[] cc = content.split(":");
-            mSender = cc[0].trim();
-            mContent = cc[1].trim();
+            //mSender = cc[0].trim();
+            //mContent = cc[1].trim();
 
-            android.util.Log.i(TAG, "sender name =" + mSender);
-            android.util.Log.i(TAG, "sender content =" + mContent);
+            //android.util.Log.i(TAG, "sender name =" + mSender);
+            //android.util.Log.i(TAG, "sender content =" + mContent);
 
 
             PendingIntent pendingIntent = notification.contentIntent;
@@ -154,40 +151,18 @@ public class MonitorEntrance extends AccessibilityService {
         }
     }
 
-
-    private AccessibilityHelper.ConditionCallback mSwitchCameraFinder = new AccessibilityHelper.ConditionCallback() {
-        @Override
-        public boolean onNodeInfoFound(AccessibilityNodeInfo info, Object... args) {
-            String sc = (String)args[0];
-            if (sc.contentEquals(info.getContentDescription())) {
-                Log.d(TAG, "Switch Camera found! perform click!");
-                AccessibilityHelper.performClick(info);
-                return true;
-            }
-            return false;
-        }
-    };
-
-    private boolean switchCamera() {
-        Log.d(TAG, "enter Switch Camera");
-        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-        if (rootNode == null) {
-            return false;
-        }
-        Resources r = getResources();
-        final String sc = r.getString(R.string.wechat_switch_camera);
-        boolean ret = null != AccessibilityHelper.find(rootNode, mSwitchCameraFinder, sc);
-        Log.d(TAG, "leave Switch Camera");
-        return ret;
-    }
-
-
     public static class MainThreadHandler extends Handler {
         public static final int MSG_RUNNABLE = 200;
-        public static final int MSG_TIMEOUT = 201;
-        public static final int MSG_USER = 202;
+        public int MSG_USER = 202;
+        private final Object mLock = new Object();
 
         private WeakReference<MonitorEntrance> mService;
+
+        public int generateId() {
+            synchronized (mLock) {
+                return MSG_USER++;
+            }
+        }
 
         public MainThreadHandler(MonitorEntrance service) {
             mService = new WeakReference<MonitorEntrance>(service);
@@ -205,21 +180,11 @@ public class MonitorEntrance extends AccessibilityService {
                 Runnable r = (Runnable) msg.obj;
                 r.run();
             }
-            /*switch (msg.what) {
-                case MSG_TIMEOUT:
-                case MSG_RUNNABLE:
-                    Runnable r =  (Runnable)msg.obj;
-                    if (null != r) {
-                        r.run();
-                    }
-                    break;
-            }*/
         }
     }
 
     public MainThreadHandler mHandler = new MainThreadHandler(this);
 
-    //播放提示声音
     private MediaPlayer player;
     public void playSound(Context context) {
         Calendar cal = Calendar.getInstance();
@@ -262,7 +227,8 @@ public class MonitorEntrance extends AccessibilityService {
                 break;
             case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED: {
                 if (VIDEO_WINDOW.equals(className)) {
-                    WechatManAccessHelper.VideoActivity.answerTheCall(this);
+                    mVideo.answerTheCall();
+                    mVideo.switchCamera();
                 } else if (CHAT_WINDOW.equals(className)) {
                     /*if (WeChatManAccessHelper.LauncherUIChat.findEditTextAndPaste(this, "Wait for a minute.")) {
                         send();
@@ -286,7 +252,7 @@ public class MonitorEntrance extends AccessibilityService {
             break;
             case AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED: {
                 /*if (RelativeLayout.class.getName().equals(className)) {
-                    switchCamera();
+                    exchange();
                 }*/
             }
             break;
@@ -294,35 +260,16 @@ public class MonitorEntrance extends AccessibilityService {
                 /*executeDelayed(new Runnable() {
                     @Override
                     public void run() {
-                        MonitorEntrance.this.mLatestMessage.simulateManualAccess2();
+                        MonitorEntrance.this.mLatestMessage.proceed();
                     }
                 }, 1000);*/
-                mLatestMessage.simulateManualAccess2();
+                mLatestMessage.proceed();
             }
             break;
             case AccessibilityEvent.TYPE_VIEW_CLICKED: {
-                //tryDoubleClick();
             }
         }
     }
-
-    private final Runnable mDelayAcceptCall = new Runnable() {
-        @Override
-        public void run() {
-            Shell.exec("input touchscreen tap 0 0");
-            /*try {
-                Thread.sleep(200);
-            } catch (Exception e) {
-                Log.d(TAG, "sleep action is interrupted?");
-                e.printStackTrace();
-            }
-
-            if (!MonitorEntrance.this.pickUpInternal()) {
-                Log.d(TAG, "looking for Accept button...");
-                AsyncTask.execute(mDelayAcceptCall);
-            }*/
-        }
-    };
 
     public void ensureNotificationListenerAuthority() {
         String string = Settings.Secure.getString(getContentResolver(),
@@ -356,6 +303,7 @@ public class MonitorEntrance extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         mLatestMessage.register(this);
+        mVideo.register(this);
         //AccessibilityServiceInfo info = getServiceInfo();
         //info.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS; flagIncludeNotImportantViews|
         mPowerMgr =(PowerManager)getSystemService(Context.POWER_SERVICE);
@@ -370,6 +318,7 @@ public class MonitorEntrance extends AccessibilityService {
     public void onDestroy() {
         super.onDestroy();
         mLatestMessage.unregister();
+        mVideo.unregister();
         sInstance = null;
         LogAndShowToast(R.string.robot_is_off);
         unregisterTextMessageReceiver(mCommandParser);

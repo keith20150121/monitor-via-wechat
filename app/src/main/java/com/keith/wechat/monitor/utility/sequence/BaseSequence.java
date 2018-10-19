@@ -11,6 +11,10 @@ public abstract class BaseSequence implements EventStash.ISequence {
         System.arraycopy(types, 0, mEvents, 0, types.length);
     }
 
+    public Callback callback() {
+        return mCallback;
+    }
+
     public void reset() {
         mIndex = 0;
     }

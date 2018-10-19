@@ -15,6 +15,7 @@ public class EventStash {
         }
         boolean expectedOtherwiseRemove(AccessibilityEvent event);
         boolean process(AccessibilityEvent event);
+        Callback callback();
         void reset();
     }
 
